@@ -1,0 +1,472 @@
+26-03-25 15:22:36 | actor=graph action=intent_parser | INFO | state_first_novel_agent:intent_parser:141 - intent parsed: continue
+26-03-25 15:22:36 | actor=graph action=memory_retrieval | INFO | state_first_novel_agent:memory_retrieval:151 - memory retrieved: episodic=1 semantic=3 plot=1
+26-03-25 15:22:36 | actor=graph action=plot_planner | INFO | state_first_novel_agent:plot_planner:179 - planned beat: 主角在码头找到第一条与失踪者相关的物证。
+26-03-25 15:22:36 | actor=graph action=draft_generator | INFO | state_first_novel_agent:draft_generator:187 - draft generated with 133 chars
+26-03-25 15:22:36 | actor=graph action=information_extractor | INFO | state_first_novel_agent:information_extractor:200 - extracted 2 candidate updates
+26-03-25 15:22:36 | actor=graph action=consistency_validator | INFO | state_first_novel_agent:consistency_validator:233 - consistency validation issues: 0
+26-03-25 15:22:36 | actor=graph action=style_evaluator | INFO | state_first_novel_agent:style_evaluator:268 - style evaluation status: passed
+26-03-25 15:22:36 | actor=graph action=commit_or_rollback | INFO | state_first_novel_agent:commit_or_rollback:305 - state committed with 2 accepted changes
+26-03-25 15:22:36 | actor=graph action=intent_parser | INFO | state_first_novel_agent:intent_parser:141 - intent parsed: continue
+26-03-25 15:22:36 | actor=graph action=memory_retrieval | INFO | state_first_novel_agent:memory_retrieval:151 - memory retrieved: episodic=1 semantic=3 plot=1
+26-03-25 15:22:36 | actor=graph action=plot_planner | INFO | state_first_novel_agent:plot_planner:179 - planned beat: 主角在码头找到第一条与失踪者相关的物证。
+26-03-25 15:22:36 | actor=graph action=draft_generator | INFO | state_first_novel_agent:draft_generator:187 - draft generated with 133 chars
+26-03-25 15:22:36 | actor=graph action=information_extractor | INFO | state_first_novel_agent:information_extractor:200 - extracted 2 candidate updates
+26-03-25 15:22:36 | actor=graph action=consistency_validator | INFO | state_first_novel_agent:consistency_validator:233 - consistency validation issues: 1
+26-03-25 15:22:36 | actor=graph action=style_evaluator | INFO | state_first_novel_agent:style_evaluator:268 - style evaluation status: failed
+26-03-25 15:22:36 | actor=graph action=commit_or_rollback | WARNING | state_first_novel_agent:commit_or_rollback:289 - rollback due to blocking validation issues
+26-03-25 15:23:30 | tid=thread-demo-001 story=story-demo-001 actor=graph action=intent_parser | INFO | state_first_novel_agent:intent_parser:141 - intent parsed: continue
+26-03-25 15:23:30 | tid=thread-demo-001 story=story-demo-001 actor=graph action=memory_retrieval | INFO | state_first_novel_agent:memory_retrieval:151 - memory retrieved: episodic=1 semantic=3 plot=1
+26-03-25 15:23:30 | tid=thread-demo-001 story=story-demo-001 actor=graph action=plot_planner | INFO | state_first_novel_agent:plot_planner:179 - planned beat: 主角在码头找到第一条与失踪者相关的物证。
+26-03-25 15:23:30 | tid=thread-demo-001 story=story-demo-001 actor=graph action=draft_generator | INFO | state_first_novel_agent:draft_generator:187 - draft generated with 133 chars
+26-03-25 15:23:30 | tid=thread-demo-001 story=story-demo-001 actor=graph action=information_extractor | INFO | state_first_novel_agent:information_extractor:200 - extracted 2 candidate updates
+26-03-25 15:23:30 | tid=thread-demo-001 story=story-demo-001 actor=graph action=consistency_validator | INFO | state_first_novel_agent:consistency_validator:233 - consistency validation issues: 0
+26-03-25 15:23:30 | tid=thread-demo-001 story=story-demo-001 actor=graph action=style_evaluator | INFO | state_first_novel_agent:style_evaluator:268 - style evaluation status: passed
+26-03-25 15:23:30 | tid=thread-demo-001 story=story-demo-001 actor=graph action=commit_or_rollback | INFO | state_first_novel_agent:commit_or_rollback:305 - state committed with 2 accepted changes
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=intent_parser | INFO | state_first_novel_agent:intent_parser:141 - intent parsed: continue
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=memory_retrieval | INFO | state_first_novel_agent:memory_retrieval:151 - memory retrieved: episodic=1 semantic=3 plot=1
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=plot_planner | INFO | state_first_novel_agent:plot_planner:179 - planned beat: 主角在码头找到第一条与失踪者相关的物证。
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=draft_generator | INFO | state_first_novel_agent:draft_generator:187 - draft generated with 133 chars
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=information_extractor | INFO | state_first_novel_agent:information_extractor:200 - extracted 2 candidate updates
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=consistency_validator | INFO | state_first_novel_agent:consistency_validator:233 - consistency validation issues: 0
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=style_evaluator | INFO | state_first_novel_agent:style_evaluator:268 - style evaluation status: passed
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=commit_or_rollback | INFO | state_first_novel_agent:commit_or_rollback:305 - state committed with 2 accepted changes
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=intent_parser | INFO | state_first_novel_agent:intent_parser:141 - intent parsed: continue
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=memory_retrieval | INFO | state_first_novel_agent:memory_retrieval:151 - memory retrieved: episodic=1 semantic=3 plot=1
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=plot_planner | INFO | state_first_novel_agent:plot_planner:179 - planned beat: 主角在码头找到第一条与失踪者相关的物证。
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=draft_generator | INFO | state_first_novel_agent:draft_generator:187 - draft generated with 133 chars
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=information_extractor | INFO | state_first_novel_agent:information_extractor:200 - extracted 2 candidate updates
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=consistency_validator | INFO | state_first_novel_agent:consistency_validator:233 - consistency validation issues: 1
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=style_evaluator | INFO | state_first_novel_agent:style_evaluator:268 - style evaluation status: failed
+26-03-25 15:23:32 | tid=thread-demo-001 story=story-demo-001 actor=graph action=commit_or_rollback | WARNING | state_first_novel_agent:commit_or_rollback:289 - rollback due to blocking validation issues
+26-03-25 15:54:20 | tid=thread-demo-001 story=story-demo-001 actor=graph action=intent_parser | INFO | state_first_novel_agent:intent_parser:184 - intent parsed: continue
+26-03-25 15:54:20 | tid=thread-demo-001 story=story-demo-001 actor=graph action=memory_retrieval | INFO | state_first_novel_agent:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1
+26-03-25 15:54:20 | tid=thread-demo-001 story=story-demo-001 actor=graph action=plot_planner | INFO | state_first_novel_agent:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。
+26-03-25 15:54:20 | tid=thread-demo-001 story=story-demo-001 actor=graph action=draft_generator | INFO | state_first_novel_agent:draft_generator:240 - draft generated with 133 chars
+26-03-25 15:54:20 | tid=thread-demo-001 story=story-demo-001 actor=graph action=information_extractor | INFO | state_first_novel_agent:information_extractor:255 - extracted 2 candidate updates
+26-03-25 15:54:20 | tid=thread-demo-001 story=story-demo-001 actor=graph action=consistency_validator | INFO | state_first_novel_agent:consistency_validator:310 - consistency validation issues: 0
+26-03-25 15:54:20 | tid=thread-demo-001 story=story-demo-001 actor=graph action=style_evaluator | INFO | state_first_novel_agent:style_evaluator:356 - style evaluation status: passed
+26-03-25 15:54:20 | tid=thread-demo-001 story=story-demo-001 actor=graph action=commit_or_rollback | INFO | state_first_novel_agent:commit_or_rollback:393 - state committed with 2 accepted changes
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=intent_parser | INFO | state_first_novel_agent:intent_parser:184 - intent parsed: continue
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=memory_retrieval | INFO | state_first_novel_agent:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=plot_planner | INFO | state_first_novel_agent:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=draft_generator | INFO | state_first_novel_agent:draft_generator:240 - draft generated with 133 chars
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=information_extractor | INFO | state_first_novel_agent:information_extractor:255 - extracted 2 candidate updates
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=consistency_validator | INFO | state_first_novel_agent:consistency_validator:310 - consistency validation issues: 0
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=style_evaluator | INFO | state_first_novel_agent:style_evaluator:356 - style evaluation status: passed
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=commit_or_rollback | INFO | state_first_novel_agent:commit_or_rollback:393 - state committed with 2 accepted changes
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=intent_parser | INFO | state_first_novel_agent:intent_parser:184 - intent parsed: continue
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=memory_retrieval | INFO | state_first_novel_agent:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=plot_planner | INFO | state_first_novel_agent:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=draft_generator | INFO | state_first_novel_agent:draft_generator:240 - draft generated with 133 chars
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=information_extractor | INFO | state_first_novel_agent:information_extractor:255 - extracted 2 candidate updates
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=consistency_validator | INFO | state_first_novel_agent:consistency_validator:310 - consistency validation issues: 1
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=style_evaluator | INFO | state_first_novel_agent:style_evaluator:356 - style evaluation status: failed
+26-03-25 15:54:21 | tid=thread-demo-001 story=story-demo-001 actor=graph action=commit_or_rollback | WARNING | state_first_novel_agent:commit_or_rollback:377 - rollback due to blocking validation issues
+26-03-25 15:54:41 | tid=thread-demo-001 story=story-demo-001 actor=graph action=intent_parser | INFO | state_first_novel_agent:intent_parser:184 - intent parsed: continue
+26-03-25 15:54:41 | tid=thread-demo-001 story=story-demo-001 actor=graph action=memory_retrieval | INFO | state_first_novel_agent:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1
+26-03-25 15:54:41 | tid=thread-demo-001 story=story-demo-001 actor=graph action=plot_planner | INFO | state_first_novel_agent:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。
+26-03-25 15:54:41 | tid=thread-demo-001 story=story-demo-001 actor=graph action=draft_generator | INFO | state_first_novel_agent:draft_generator:240 - draft generated with 133 chars
+26-03-25 15:54:41 | tid=thread-demo-001 story=story-demo-001 actor=graph action=information_extractor | INFO | state_first_novel_agent:information_extractor:255 - extracted 2 candidate updates
+26-03-25 15:54:41 | tid=thread-demo-001 story=story-demo-001 actor=graph action=consistency_validator | INFO | state_first_novel_agent:consistency_validator:310 - consistency validation issues: 0
+26-03-25 15:54:41 | tid=thread-demo-001 story=story-demo-001 actor=graph action=style_evaluator | INFO | state_first_novel_agent:style_evaluator:356 - style evaluation status: passed
+26-03-25 15:54:41 | tid=thread-demo-001 story=story-demo-001 actor=graph action=commit_or_rollback | INFO | state_first_novel_agent:commit_or_rollback:393 - state committed with 2 accepted changes
+[32m26-03-25 16:10:03.066 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 16:10:03.066 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 16:10:03.067 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 16:10:03.067 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 16:10:03.068 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 16:10:03.068 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 16:10:03.069 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 16:10:03.069 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 16:10:03.947 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 16:10:03.947 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 16:10:03.947 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 16:10:03.948 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 16:10:03.948 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 16:10:03.949 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 16:10:03.949 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 16:10:03.949 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 16:10:03.953 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 16:10:03.953 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 16:10:03.953 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 16:10:03.954 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 16:10:03.954 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 16:10:03.954 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 16:10:03.954 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 16:10:03.955 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 16:10:03.956 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 16:10:03.957 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 16:10:03.958 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 16:10:03.958 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 16:10:03.958 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 16:10:03.958 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 16:10:03.959 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 16:10:03.959 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 16:10:03.962 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 16:10:03.962 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 16:10:03.962 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 16:10:03.963 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 16:10:03.963 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 16:10:03.963 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 16:10:03.963 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 16:10:03.964 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:01:21.667 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:01:21.667 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:01:21.668 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:01:21.669 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:01:21.669 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:01:21.670 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:01:21.671 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:01:21.671 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:01:21.677 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:01:21.677 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:01:21.678 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:01:21.678 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:01:21.679 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:01:21.679 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:01:21.679 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:01:21.681 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:01:21.685 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:01:21.686 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:01:21.687 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:01:21.688 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:01:21.691 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:01:21.695 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:01:21.695 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:01:21.696 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:01:21.702 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:01:21.704 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:01:21.704 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:01:21.704 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:01:21.705 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:01:21.705 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:01:21.705 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:01:21.706 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:01:54.887 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:01:54.887 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:01:54.888 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:01:54.888 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:01:54.889 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:01:54.889 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:01:54.889 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:01:54.889 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:01:54.892 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:01:54.892 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:01:54.893 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:01:54.893 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:01:54.893 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:01:54.893 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:01:54.894 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:01:54.894 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:01:54.896 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:01:54.897 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:01:54.897 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:01:54.897 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:01:54.897 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:01:54.897 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:01:54.898 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:01:54.898 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:01:54.901 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:01:54.902 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:01:54.902 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:01:54.902 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:01:54.903 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:01:54.903 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:01:54.903 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:01:54.904 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:02:32.776 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:02:32.776 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:02:32.776 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:02:32.777 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:02:32.778 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:02:32.778 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:02:32.779 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:02:32.779 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:02:33.199 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:02:33.200 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:02:33.200 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:02:33.200 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:02:33.201 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:02:33.202 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:02:33.202 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:02:33.203 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:02:33.205 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:02:33.205 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:02:33.205 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:02:33.205 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:02:33.207 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:02:33.207 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:02:33.207 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:02:33.207 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:02:33.210 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:02:33.210 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:02:33.211 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:02:33.211 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:02:33.212 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:02:33.212 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:02:33.212 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:02:33.212 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:02:33.215 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:02:33.215 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:02:33.217 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:02:33.217 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:02:33.217 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:02:33.218 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:02:33.218 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:02:33.218 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:03:15.185 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:03:15.186 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:03:15.186 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:03:15.187 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:03:15.188 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:03:15.189 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:03:15.189 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:03:15.190 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:03:15.193 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:03:15.193 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:03:15.193 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:03:15.193 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:03:15.194 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:03:15.194 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:03:15.194 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:03:15.195 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:03:15.197 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:03:15.198 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:03:15.198 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:03:15.198 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:03:15.198 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:03:15.200 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:03:15.200 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:03:15.200 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:03:15.203 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:03:15.204 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:03:15.205 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:03:15.205 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:03:15.206 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:03:15.206 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:03:15.206 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:03:15.207 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:03:30.621 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:03:30.621 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:03:30.621 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:03:30.622 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:03:30.622 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:03:30.622 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:03:30.623 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:03:30.623 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:31:22.343 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:31:22.344 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:31:22.345 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:31:22.345 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:31:22.346 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:31:22.347 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:31:22.347 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:31:22.348 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:31:22.350 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:31:22.350 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:31:22.350 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:31:22.350 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:31:22.350 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:31:22.352 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:31:22.352 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:31:22.352 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:31:22.355 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:31:22.355 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:31:22.356 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:31:22.356 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:31:22.356 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:31:22.357 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:31:22.357 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:31:22.357 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:31:22.361 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:31:22.361 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:31:22.361 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:31:22.361 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:31:22.362 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:31:22.363 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:31:22.363 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:31:22.363 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:33:53.512 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:33:53.513 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:33:53.513 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:33:53.514 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:33:53.514 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:33:53.515 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:33:53.515 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:33:53.516 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:34:24.264 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:34:24.265 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:34:24.265 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:34:24.266 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:34:24.266 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:34:24.266 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:34:24.267 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:34:24.267 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:35:20.831 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:35:20.832 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:35:20.832 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:35:20.833 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:35:20.833 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:35:20.834 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:35:20.834 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:35:20.834 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:35:20.837 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:35:20.839 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:35:20.839 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:35:20.840 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:35:20.840 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:35:20.840 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:35:20.841 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:35:20.841 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:35:20.845 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:35:20.845 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:35:20.845 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:35:20.847 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:35:20.847 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:35:20.847 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:35:20.848 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:35:20.848 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:35:20.851 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:35:20.851 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:35:20.852 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:35:20.852 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:35:20.852 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:35:20.854 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:35:20.854 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:35:20.854 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:36:00.412 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:36:00.412 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:36:00.412 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:36:00.413 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:36:00.413 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:36:00.413 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:36:00.413 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:36:00.415 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:36:00.417 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:36:00.417 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:36:00.417 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:36:00.418 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:36:00.418 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:36:00.418 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:36:00.418 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:36:00.419 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:36:00.421 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:36:00.421 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:36:00.422 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:36:00.422 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:36:00.422 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:36:00.422 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:36:00.424 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:36:00.424 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:36:00.428 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:36:00.429 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:36:00.429 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:36:00.429 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:36:00.431 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:36:00.431 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:36:00.431 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:36:00.431 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:36:27.001 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:36:27.003 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:36:27.003 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:36:27.004 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:36:27.004 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:36:27.005 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:36:27.006 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:36:27.006 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:36:27.009 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:36:27.009 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:36:27.009 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:36:27.009 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:36:27.010 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:36:27.010 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:36:27.010 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:36:27.011 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:36:27.014 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:36:27.014 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:36:27.014 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:36:27.015 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:36:27.015 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:36:27.015 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:36:27.016 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:36:27.016 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:36:27.021 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:36:27.021 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:36:27.022 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:36:27.022 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:36:27.022 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:36:27.023 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:36:27.023 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:36:27.024 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:36:54.061 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:36:54.062 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:36:54.062 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:36:54.062 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:36:54.063 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:36:54.063 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:36:54.063 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:36:54.063 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:36:54.146 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:36:54.147 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:36:54.147 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:36:54.148 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:36:54.148 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:36:54.149 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:36:54.149 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:36:54.149 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:36:54.151 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:36:54.152 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:36:54.152 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:36:54.152 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:36:54.153 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:36:54.153 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:36:54.153 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:36:54.153 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:36:54.156 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:36:54.156 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:36:54.156 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:36:54.157 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:36:54.157 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:36:54.157 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:36:54.157 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:36:54.157 | INFO | state_first_novel_agent.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:36:54.160 | INFO | state_first_novel_agent.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:36:54.160 | INFO | state_first_novel_agent.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:36:54.161 | INFO | state_first_novel_agent.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:36:54.161 | INFO | state_first_novel_agent.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:36:54.161 | INFO | state_first_novel_agent.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:36:54.161 | INFO | state_first_novel_agent.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:36:54.162 | INFO | state_first_novel_agent.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:36:54.162 | WARNING | state_first_novel_agent.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:47:48.008 | INFO | narrative_state_engine.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:47:48.009 | INFO | narrative_state_engine.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:47:48.009 | INFO | narrative_state_engine.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:47:48.010 | INFO | narrative_state_engine.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:47:48.010 | INFO | narrative_state_engine.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:47:48.011 | INFO | narrative_state_engine.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:47:48.011 | INFO | narrative_state_engine.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:47:48.011 | INFO | narrative_state_engine.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:47:48.015 | INFO | narrative_state_engine.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:47:48.015 | INFO | narrative_state_engine.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:47:48.015 | INFO | narrative_state_engine.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:47:48.016 | INFO | narrative_state_engine.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:47:48.016 | INFO | narrative_state_engine.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:47:48.016 | INFO | narrative_state_engine.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:47:48.016 | INFO | narrative_state_engine.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:47:48.016 | WARNING | narrative_state_engine.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
+[32m26-03-25 17:47:48.018 | INFO | narrative_state_engine.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:47:48.020 | INFO | narrative_state_engine.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:47:48.020 | INFO | narrative_state_engine.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:47:48.020 | INFO | narrative_state_engine.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:47:48.020 | INFO | narrative_state_engine.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:47:48.020 | INFO | narrative_state_engine.graph.nodes:consistency_validator:310 - consistency validation issues: 0[0m
+[32m26-03-25 17:47:48.020 | INFO | narrative_state_engine.graph.nodes:style_evaluator:356 - style evaluation status: passed[0m
+[32m26-03-25 17:47:48.021 | INFO | narrative_state_engine.graph.nodes:commit_or_rollback:393 - state committed with 2 accepted changes[0m
+[32m26-03-25 17:47:48.025 | INFO | narrative_state_engine.graph.nodes:intent_parser:184 - intent parsed: continue[0m
+[32m26-03-25 17:47:48.025 | INFO | narrative_state_engine.graph.nodes:memory_retrieval:194 - memory retrieved: episodic=1 semantic=3 plot=1[0m
+[32m26-03-25 17:47:48.025 | INFO | narrative_state_engine.graph.nodes:plot_planner:222 - planned beat: 主角在码头找到第一条与失踪者相关的物证。[0m
+[32m26-03-25 17:47:48.026 | INFO | narrative_state_engine.graph.nodes:draft_generator:240 - draft generated with 133 chars[0m
+[32m26-03-25 17:47:48.026 | INFO | narrative_state_engine.graph.nodes:information_extractor:255 - extracted 2 candidate updates[0m
+[32m26-03-25 17:47:48.026 | INFO | narrative_state_engine.graph.nodes:consistency_validator:310 - consistency validation issues: 1[0m
+[32m26-03-25 17:47:48.026 | INFO | narrative_state_engine.graph.nodes:style_evaluator:356 - style evaluation status: failed[0m
+[33m26-03-25 17:47:48.027 | WARNING | narrative_state_engine.graph.nodes:commit_or_rollback:377 - rollback due to blocking validation issues[0m
