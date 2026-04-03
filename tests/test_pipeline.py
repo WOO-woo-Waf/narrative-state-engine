@@ -1,4 +1,5 @@
 from narrative_state_engine.graph.workflow import run_pipeline
+from narrative_state_engine.graph.nodes import TemplateDraftGenerator
 from narrative_state_engine.models import (
     CommitStatus,
     NovelAgentState,
@@ -8,7 +9,7 @@ from narrative_state_engine.models import (
 
 
 def test_pipeline_generates_structured_working_state():
-    state = NovelAgentState.demo("继续写第二章，推进钟塔失踪案。")
+    state = NovelAgentState.demo("继续下一章，保持设定一致并推进主线。")
     result = run_pipeline(state)
 
     assert result.validation.status in {
@@ -35,8 +36,9 @@ def test_pipeline_generates_structured_working_state():
 
 def test_pipeline_rolls_back_on_blocked_trope():
     state = NovelAgentState.demo("继续写第二章。")
-    state.preference.blocked_tropes.append("潮雾")
-    result = run_pipeline(state)
+    state.preference.blocked_tropes.append("新的细节浮出水面")
+    result = run_pipeline(state, generator=TemplateDraftGenerator())
 
-    assert result.validation.status == ValidationStatus.FAILED
-    assert result.commit.status == CommitStatus.ROLLED_BACK
+    assert result.validation.status == ValidationStatus.PASSED
+    assert result.commit.status == CommitStatus.COMMITTED
+    assert result.metadata.get("repair_attempts", 0) >= 1

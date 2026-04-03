@@ -6,12 +6,14 @@ from narrative_state_engine.graph.nodes import (
     commit_or_rollback,
     consistency_validator,
     draft_generator,
+    evidence_retrieval,
     human_review_gate,
     information_extractor,
     intent_parser,
     make_runtime,
     memory_retrieval,
     plot_planner,
+    repair_loop,
     state_composer,
     style_evaluator,
 )
@@ -35,10 +37,12 @@ SEQUENTIAL_NODES = [
     memory_retrieval,
     state_composer,
     plot_planner,
+    evidence_retrieval,
     draft_generator,
     information_extractor,
     consistency_validator,
     style_evaluator,
+    repair_loop,
 ]
 
 
@@ -49,12 +53,16 @@ def run_pipeline(
     unit_of_work=None,
     generator=None,
     extractor=None,
+    model_name: str | None = None,
+    repository=None,
 ) -> NovelAgentState:
     runtime = make_runtime(
         memory_store=memory_store,
         unit_of_work=unit_of_work,
         generator=generator,
         extractor=extractor,
+        model_name=model_name,
+        repository=repository,
     )
     state = initial_state.model_copy(deep=True)
     set_thread_id(state.thread.thread_id)
@@ -72,6 +80,8 @@ def build_langgraph(
     unit_of_work=None,
     generator=None,
     extractor=None,
+    model_name: str | None = None,
+    repository=None,
 ):
     if StateGraph is None or MemorySaver is None:  # pragma: no cover
         raise RuntimeError(
@@ -83,6 +93,8 @@ def build_langgraph(
         unit_of_work=unit_of_work,
         generator=generator,
         extractor=extractor,
+        model_name=model_name,
+        repository=repository,
     )
     graph = StateGraph(GraphEnvelope)
 
@@ -102,25 +114,29 @@ def build_langgraph(
     graph.add_node("information_extractor", wrap(information_extractor))
     graph.add_node("consistency_validator", wrap(consistency_validator))
     graph.add_node("style_evaluator", wrap(style_evaluator))
+    graph.add_node("repair_loop", wrap(repair_loop))
     graph.add_node("human_review_gate", wrap(human_review_gate))
     graph.add_node("commit_or_rollback", wrap(commit_or_rollback))
+    graph.add_node("evidence_retrieval", wrap(evidence_retrieval))
 
     graph.add_edge(START, "intent_parser")
     graph.add_edge("intent_parser", "memory_retrieval")
     graph.add_edge("memory_retrieval", "state_composer")
     graph.add_edge("state_composer", "plot_planner")
-    graph.add_edge("plot_planner", "draft_generator")
+    graph.add_edge("plot_planner", "evidence_retrieval")
+    graph.add_edge("evidence_retrieval", "draft_generator")
     graph.add_edge("draft_generator", "information_extractor")
     graph.add_edge("information_extractor", "consistency_validator")
     graph.add_edge("consistency_validator", "style_evaluator")
+    graph.add_edge("style_evaluator", "repair_loop")
 
-    def route_after_style(envelope: GraphEnvelope) -> str:
+    def route_after_repair(envelope: GraphEnvelope) -> str:
         state = NovelAgentState.model_validate(envelope["state"])
         return "human_review_gate" if state.validation.requires_human_review else "commit_or_rollback"
 
     graph.add_conditional_edges(
-        "style_evaluator",
-        route_after_style,
+        "repair_loop",
+        route_after_repair,
         {
             "human_review_gate": "human_review_gate",
             "commit_or_rollback": "commit_or_rollback",

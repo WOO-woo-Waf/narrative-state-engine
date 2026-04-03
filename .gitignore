@@ -1,6 +1,8 @@
 .venv/
 .env
 .env.local
+.env.*
+!.env.example
 __pycache__/
 .pytest_cache/
 *.pyc
@@ -9,3 +11,8 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+logs/
+*.log
+*.jsonl
+novels_output/
+novels_input/

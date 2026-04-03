@@ -47,9 +47,9 @@ pip install -e .[dev]
 ```dotenv
 NOVEL_AGENT_DATABASE_URL=postgresql+psycopg://postgres:your_password@localhost:5432/novel_agent
 
-NOVEL_AGENT_LLM_API_BASE=https://your-base-url/v1
-NOVEL_AGENT_LLM_API_KEY=your-key
-NOVEL_AGENT_LLM_MODEL=your-model
+NOVEL_AGENT_LLM_API_BASE=https://ark.cn-beijing.volces.com/api/v3
+NOVEL_AGENT_LLM_API_KEY=your-ark-api-key
+NOVEL_AGENT_LLM_MODEL=deepseek-v3-2-251201
 
 NOVEL_AGENT_LOG_LEVEL=INFO
 NOVEL_AGENT_LOG_DIR=./logs
@@ -58,6 +58,8 @@ NOVEL_AGENT_LLM_USAGE_LOG_FILE=llm_token_usage.jsonl
 ```
 
 未配置 LLM 时，系统会自动回退到模板生成和规则抽取。未配置数据库时，会自动回退到内存仓储。
+
+说明：这里只需要配置一个 API key（`NOVEL_AGENT_LLM_API_KEY`）。
 
 ## Quick Start
 
@@ -68,6 +70,20 @@ conda activate novel-create
 narrative-state-engine demo
 ```
 
+按别名切换到备用模型：
+
+```powershell
+conda activate novel-create
+narrative-state-engine demo --model doubao-seed-2-0-pro-260215
+```
+
+按名称直接指定模型：
+
+```powershell
+conda activate novel-create
+narrative-state-engine demo --model deepseek-v3-2-251201
+```
+
 代码调用:
 
 ```python
@@ -75,14 +91,34 @@ from narrative_state_engine.application import NovelContinuationService
 from narrative_state_engine.models import NovelAgentState
 
 service = NovelContinuationService()
-state = NovelAgentState.demo("继续写第二章，推进钟塔失踪案。")
-result = service.continue_from_state(state, persist=True)
+state = NovelAgentState.demo("继续下一章，保持既有风格并推进主线。")
+result = service.continue_from_state(
+	state,
+	persist=True,
+	llm_model_name="doubao-seed-2-0-pro-260215",  # 按名称覆盖
+)
 
 print(result.state.draft.content)
 print(result.state.commit.status)
 print(result.state.commit.accepted_changes)
 print(result.state.commit.conflict_changes)
 ```
+
+从小说 txt 文件继续写（项目根目录运行脚本）:
+
+```powershell
+conda activate novel-create
+python run_novel_continuation.py \
+	--novel-dir D:\novels\book_a \
+	--input-file part1.txt \
+	--instruction "基于已有内容继续下一章，保持人物口吻一致" \
+	--model deepseek-v3-2-251201
+```
+
+运行后会在同目录输出：
+
+- `[input-file-stem].continued.txt`：续写正文
+- `[input-file-stem].state.json`：结构化状态快照
 
 测试:
 
@@ -136,3 +172,6 @@ pytest -q
 - `docs/05_mvp_tables.md`
 - `docs/08_architecture_usage.md`
 - `docs/09_code_api.md`
+- `docs/10_runtime_io_audit.md`
+- `docs/11_style_capture_modeling.md`
+- `docs/12_formal_run_template.md`

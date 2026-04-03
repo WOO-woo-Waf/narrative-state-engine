@@ -2,9 +2,9 @@
 
 ## 目标
 
-本项目默认按“代码直接调用”的方式使用，不提供前端界面。
+本项目默认按代码直接调用方式使用，不提供前端页面。
 
-核心入口是：
+核心入口：
 
 - `narrative_state_engine.application.NovelContinuationService`
 
@@ -15,7 +15,7 @@ from narrative_state_engine.application import NovelContinuationService
 from narrative_state_engine.models import NovelAgentState
 
 service = NovelContinuationService()
-state = NovelAgentState.demo("继续写第二章，推进钟塔失踪案。")
+state = NovelAgentState.demo("继续下一章，保持既有风格并推进主线。")
 result = service.continue_from_state(state, persist=True)
 
 print(result.state.draft.content)
@@ -37,8 +37,8 @@ print(result.state.commit.conflict_changes)
 
 主要方法：
 
-- `continue_from_state(state, persist=True, use_langgraph=False)`
-- `continue_story(story_id, user_input, persist=True, use_langgraph=False)`
+- `continue_from_state(state, persist=True, use_langgraph=False, llm_model_name=None)`
+- `continue_story(story_id, user_input, persist=True, use_langgraph=False, llm_model_name=None)`
 
 ### `ContinuationResult`
 
@@ -47,63 +47,22 @@ print(result.state.commit.conflict_changes)
 - `state`: 续写后的完整 `NovelAgentState`
 - `persisted`: 是否已经持久化
 
-### `InMemoryStoryStateRepository`
+## 模型切换方式
 
-用于本地开发和测试。
+两种方式：
 
-### `PostgreSQLStoryStateRepository`
+1. 改环境变量 `NOVEL_AGENT_LLM_MODEL`
+2. 调用时传 `llm_model_name`
 
-用于真实持久化场景。
+示例：
 
-当前仓储读取策略：
-
-- 优先读取 `story_versions.snapshot`
-
-当前仓储写入策略：
-
-- 事务内写入 snapshot
-- 同步刷新章节、人物、事件、世界事实、剧情线、风格和偏好投影
-- 写入 `validation_runs`
-- 写入 `commit_log`
-- 写入 `conflict_queue`
-
-## 续写任务的真实输出
-
-一次代码调用后，你能拿到四类关键结果：
-
-### 1. 正文
-
-- `result.state.draft.content`
-
-### 2. 结构化生成元信息
-
-- `result.state.draft.planned_beat`
-- `result.state.draft.style_targets`
-- `result.state.draft.continuity_notes`
-
-### 3. 结构化状态变更
-
-- `result.state.commit.accepted_changes`
-
-每个变更都是 `StateChangeProposal`，可以继续用于：
-
-- 持久化
-- 审计
-- 回放
-- 统计
-
-### 4. 冲突状态变更
-
-如果 proposal 与旧设定冲突，则不会直接写回 canonical state，而会出现在：
-
-- `result.state.commit.conflict_changes`
-- `result.state.commit.conflict_records`
-
-这部分适合后续送去：
-
-- 人工复核
-- conflict resolution
-- 规则修订
+```python
+result = service.continue_from_state(
+    state,
+    persist=True,
+    llm_model_name="deepseek-v3-2-251201",
+)
+```
 
 ## 是否使用 LangGraph
 
@@ -111,13 +70,7 @@ print(result.state.commit.conflict_changes)
 
 - `use_langgraph=False`
 
-原因：
-
-- 代码调用更直接
-- 测试更简单
-- 在无额外依赖场景下更稳
-
-如果已经安装 `langgraph`，可以：
+如已安装 `langgraph`，可开启：
 
 ```python
 result = service.continue_from_state(state, persist=True, use_langgraph=True)
@@ -131,21 +84,25 @@ result = service.continue_from_state(state, persist=True, use_langgraph=True)
 $env:NOVEL_AGENT_DATABASE_URL="postgresql+psycopg://user:password@localhost:5432/novel_agent"
 ```
 
-然后直接构造服务：
-
-```python
-service = NovelContinuationService()
-```
-
 如果环境变量存在，服务会优先使用 PostgreSQL 仓储；否则回退到内存仓储。
 
-## 当前建议用法
+## 续写任务输出
 
-对小说续写任务，推荐优先使用：
+重点输出字段：
 
-1. 代码中构造或加载 `NovelAgentState`
-2. 调用 `NovelContinuationService`
-3. 读取 `draft.content`
-4. 读取 `commit.accepted_changes`
-5. 读取 `commit.conflict_changes`
-6. 再决定是否进入下一轮续写或人工审核
+- 正文：`result.state.draft.content`
+- 结构化推进信息：`result.state.draft.planned_beat`
+- 已接受变更：`result.state.commit.accepted_changes`
+- 冲突变更：`result.state.commit.conflict_changes`
+- 冲突明细：`result.state.commit.conflict_records`
+
+## 根目录运行入口
+
+项目根目录提供：
+
+- `run_novel_continuation.py`
+
+它支持从指定小说文件夹读取 txt，构造初始状态并执行续写，输出：
+
+- `[input-stem].continued.txt`
+- `[input-stem].state.json`

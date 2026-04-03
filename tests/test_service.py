@@ -1,8 +1,10 @@
 from narrative_state_engine.application import NovelContinuationService, ProposalApplier
+from narrative_state_engine.graph.nodes import RuleBasedInformationExtractor, TemplateDraftGenerator
 from narrative_state_engine.models import (
     CommitStatus,
     ConflictRecord,
     EntityReference,
+    ExtractionStructuredOutput,
     NovelAgentState,
     StateChangeProposal,
     UpdateType,
@@ -16,8 +18,12 @@ from narrative_state_engine.storage.repository import (
 
 def test_service_persists_applied_story_state():
     repository = InMemoryStoryStateRepository()
-    service = NovelContinuationService(repository=repository)
-    state = NovelAgentState.demo("继续写第二章，推进钟塔失踪案。")
+    service = NovelContinuationService(
+        repository=repository,
+        generator=TemplateDraftGenerator(),
+        extractor=RuleBasedInformationExtractor(),
+    )
+    state = NovelAgentState.demo("继续下一章，保持设定一致并推进主线。")
 
     result = service.continue_from_state(state, persist=True)
 
@@ -31,10 +37,23 @@ def test_service_persists_applied_story_state():
 
 
 def test_service_does_not_persist_on_rollback():
+    class InvalidExtractor:
+        def extract(self, state: NovelAgentState) -> ExtractionStructuredOutput:
+            proposal = StateChangeProposal(
+                change_id="invalid-001",
+                update_type=UpdateType.EVENT,
+                summary="invalid update",
+                confidence=1.5,
+            )
+            return ExtractionStructuredOutput(accepted_updates=[proposal], notes=["invalid confidence for rollback test"])
+
     repository = InMemoryStoryStateRepository()
-    service = NovelContinuationService(repository=repository)
+    service = NovelContinuationService(
+        repository=repository,
+        generator=TemplateDraftGenerator(),
+        extractor=InvalidExtractor(),
+    )
     state = NovelAgentState.demo("继续写第二章。")
-    state.preference.blocked_tropes.append("潮雾")
 
     result = service.continue_from_state(state, persist=True)
 
@@ -50,8 +69,8 @@ def test_proposal_applier_marks_conflicts_without_overwriting_existing_canon():
         StateChangeProposal(
             change_id="fact-001",
             update_type=UpdateType.WORLD_FACT,
-            summary="潮雾会直接创造现实中的生物。",
-            details="和既有世界规则相冲突的设定变更。",
+            summary="新内容能直接覆盖已确认设定。",
+            details="与既有世界规则中的否定约束冲突。",
             stable_fact=True,
             confidence=0.9,
             related_entities=[],
@@ -66,8 +85,8 @@ def test_proposal_applier_marks_conflicts_without_overwriting_existing_canon():
     assert "conflicts with existing canon" in result.commit.conflict_changes[0].conflict_reason
     assert len(result.commit.conflict_records) == 1
     assert isinstance(result.commit.conflict_records[0], ConflictRecord)
-    assert "潮雾会直接创造现实中的生物。" not in result.story.public_facts
-    assert "潮雾会直接创造现实中的生物。" not in result.story.secret_facts
+    assert "新内容能直接覆盖已确认设定。" not in result.story.public_facts
+    assert "新内容能直接覆盖已确认设定。" not in result.story.secret_facts
 
 
 def test_proposal_applier_marks_preference_conflicts():
@@ -81,7 +100,7 @@ def test_proposal_applier_marks_preference_conflicts():
             details="新偏好与既有确认偏好冲突。",
             confidence=0.88,
             metadata={"preference_key": "pace", "preference_value": "slow"},
-            related_entities=[EntityReference(entity_id="story-demo-001", entity_type="story", name="雾港回声")],
+            related_entities=[EntityReference(entity_id="story-demo-001", entity_type="story", name="示例作品")],
         )
     ]
 

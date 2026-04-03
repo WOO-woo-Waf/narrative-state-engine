@@ -156,7 +156,7 @@ $env:NOVEL_AGENT_LLM_MODEL="your-model"
 然后运行：
 
 ```powershell
-narrative-state-engine demo "继续第二章，保持冷峻悬疑风格，并推进钟塔失踪案。"
+narrative-state-engine demo "继续下一章，保持设定一致并推进主线。"
 ```
 
 ### 开启 PostgreSQL 仓储

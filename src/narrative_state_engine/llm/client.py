@@ -10,6 +10,8 @@ from typing import Any
 
 from narrative_state_engine.llm.base import BaseLLM, LLMCallResult, resolve_stream_flag
 from narrative_state_engine.logging import get_logger
+from narrative_state_engine.logging.interaction import new_interaction_id, record_llm_interaction
+from narrative_state_engine.logging.interaction_formatters import build_llm_log_line, summarize_messages, summarize_response
 from narrative_state_engine.logging.token_usage import record_llm_token_usage
 
 logger = get_logger()
@@ -178,12 +180,24 @@ def unified_text_llm(messages: list[dict[str, Any]], **kwargs: Any) -> Any:
     max_attempts = int(kwargs.pop("max_attempts", 3) or 3)
     base_backoff_s = float(kwargs.pop("base_backoff_s", 0.6) or 0.6)
     purpose = kwargs.pop("purpose", None)
+    interaction_context = kwargs.pop("interaction_context", None)
     requested_stream = resolve_stream_flag(kwargs.get("stream"), kwargs.get("tools"))
     timeout = kwargs.pop("timeout", None)
     if timeout is None:
         kwargs["timeout"] = float(config.timeout_s)
     else:
         kwargs["timeout"] = timeout
+    interaction_options = _build_interaction_options(
+        request_kwargs=kwargs,
+        model_name=model_name,
+        purpose=purpose,
+    )
+    interaction_id = new_interaction_id()
+    if isinstance(interaction_context, dict):
+        interaction_context["interaction_id"] = interaction_id
+        interaction_context["purpose"] = purpose or ""
+        interaction_context["model_name"] = model_name
+    message_summary = summarize_messages(messages)
 
     last_err: BaseException | None = None
     for endpoint in _endpoint_pool.iter_from(endpoints):
@@ -191,9 +205,35 @@ def unified_text_llm(messages: list[dict[str, Any]], **kwargs: Any) -> Any:
         client.set_model(model_name)
         for attempt in range(max_attempts):
             started_at = time.perf_counter()
+            record_llm_interaction(
+                interaction_id=interaction_id,
+                event_type="llm_request_started",
+                model_name=model_name,
+                api_base=endpoint.api_base,
+                purpose=purpose,
+                stream=requested_stream,
+                success=False,
+                attempt=attempt + 1,
+                max_attempts=max_attempts,
+                request_messages=messages,
+                request_options=interaction_options,
+            )
+            logger.info(
+                build_llm_log_line(
+                    event_type="llm_request_started",
+                    interaction_id=interaction_id,
+                    purpose=purpose or "",
+                    model_name=model_name,
+                    attempt=attempt + 1,
+                    max_attempts=max_attempts,
+                    message_count=int(message_summary["message_count"]),
+                    request_chars=int(message_summary["request_chars"]),
+                )
+            )
             try:
                 resp = client.chat(messages, return_metadata=True, **kwargs)
                 call_result = _coerce_call_result(resp, default_stream=requested_stream)
+                duration_ms = _duration_ms(started_at)
                 _record_token_usage(
                     model_name=model_name,
                     endpoint=endpoint,
@@ -203,9 +243,41 @@ def unified_text_llm(messages: list[dict[str, Any]], **kwargs: Any) -> Any:
                     attempt=attempt + 1,
                     max_attempts=max_attempts,
                 )
+                response_summary = summarize_response(call_result.value)
+                record_llm_interaction(
+                    interaction_id=interaction_id,
+                    event_type="llm_request_succeeded",
+                    model_name=model_name,
+                    api_base=endpoint.api_base,
+                    purpose=purpose,
+                    stream=call_result.stream,
+                    success=True,
+                    attempt=attempt + 1,
+                    max_attempts=max_attempts,
+                    request_messages=messages,
+                    request_options=interaction_options,
+                    response_text=str(call_result.value),
+                    duration_ms=duration_ms,
+                )
+                logger.info(
+                    build_llm_log_line(
+                        event_type="llm_request_succeeded",
+                        interaction_id=interaction_id,
+                        purpose=purpose or "",
+                        model_name=model_name,
+                        attempt=attempt + 1,
+                        max_attempts=max_attempts,
+                        duration_ms=duration_ms,
+                        message_count=int(message_summary["message_count"]),
+                        request_chars=int(message_summary["request_chars"]),
+                        response_chars=int(response_summary["response_chars"]),
+                    )
+                )
                 return call_result.value
             except Exception as exc:
                 last_err = exc
+                duration_ms = _duration_ms(started_at)
+                retryable = _is_transient_error(exc)
                 _record_token_usage_error(
                     model_name=model_name,
                     endpoint=endpoint,
@@ -216,10 +288,89 @@ def unified_text_llm(messages: list[dict[str, Any]], **kwargs: Any) -> Any:
                     attempt=attempt + 1,
                     max_attempts=max_attempts,
                 )
-                logger.warning(f"LLM call failed on attempt {attempt + 1}/{max_attempts}: {exc}")
-                if not _is_transient_error(exc):
+                record_llm_interaction(
+                    interaction_id=interaction_id,
+                    event_type="llm_request_failed",
+                    model_name=model_name,
+                    api_base=endpoint.api_base,
+                    purpose=purpose,
+                    stream=requested_stream,
+                    success=False,
+                    attempt=attempt + 1,
+                    max_attempts=max_attempts,
+                    request_messages=messages,
+                    request_options=interaction_options,
+                    response_text="",
+                    duration_ms=duration_ms,
+                    retryable_error=retryable,
+                    error=exc,
+                )
+                logger.warning(
+                    build_llm_log_line(
+                        event_type="llm_request_failed",
+                        interaction_id=interaction_id,
+                        purpose=purpose or "",
+                        model_name=model_name,
+                        attempt=attempt + 1,
+                        max_attempts=max_attempts,
+                        duration_ms=duration_ms,
+                        message_count=int(message_summary["message_count"]),
+                        request_chars=int(message_summary["request_chars"]),
+                        error_type=exc.__class__.__name__,
+                        error_message=str(exc),
+                    )
+                )
+                if not retryable:
+                    record_llm_interaction(
+                        interaction_id=interaction_id,
+                        event_type="llm_request_exhausted",
+                        model_name=model_name,
+                        api_base=endpoint.api_base,
+                        purpose=purpose,
+                        stream=requested_stream,
+                        success=False,
+                        attempt=attempt + 1,
+                        max_attempts=max_attempts,
+                        request_messages=messages,
+                        request_options=interaction_options,
+                        duration_ms=duration_ms,
+                        retryable_error=False,
+                        error=exc,
+                    )
                     break
+                record_llm_interaction(
+                    interaction_id=interaction_id,
+                    event_type="llm_request_retrying",
+                    model_name=model_name,
+                    api_base=endpoint.api_base,
+                    purpose=purpose,
+                    stream=requested_stream,
+                    success=False,
+                    attempt=attempt + 1,
+                    max_attempts=max_attempts,
+                    request_messages=messages,
+                    request_options=interaction_options,
+                    duration_ms=duration_ms,
+                    retryable_error=True,
+                    error=exc,
+                )
                 _sleep_backoff(attempt=attempt, base_backoff_s=base_backoff_s)
+    if last_err is not None:
+        record_llm_interaction(
+            interaction_id=interaction_id,
+            event_type="llm_request_exhausted",
+            model_name=model_name,
+            api_base=endpoints[-1].api_base if endpoints else "",
+            purpose=purpose,
+            stream=requested_stream,
+            success=False,
+            attempt=max_attempts,
+            max_attempts=max_attempts,
+            request_messages=messages,
+            request_options=interaction_options,
+            retryable_error=_is_transient_error(last_err),
+            error=last_err,
+        )
     raise RuntimeError(f"All LLM endpoints failed: {last_err}")
 
 
@@ -280,6 +431,30 @@ def _normalize_str_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple)):
         return [str(item).strip() for item in value if str(item).strip()]
     return _split_multi(str(value))
+
+
+def _build_interaction_options(*, request_kwargs: dict[str, Any], model_name: str, purpose: str | None) -> dict[str, Any]:
+    options: dict[str, Any] = {
+        "model_name": model_name,
+        "purpose": purpose or "",
+    }
+    for key in [
+        "temperature",
+        "max_tokens",
+        "top_p",
+        "presence_penalty",
+        "frequency_penalty",
+        "json_mode",
+        "stream",
+        "timeout",
+        "tool_choice",
+    ]:
+        if key in request_kwargs:
+            options[key] = request_kwargs.get(key)
+    if "tools" in request_kwargs:
+        tools = request_kwargs.get("tools") or []
+        options["tools_count"] = len(tools) if isinstance(tools, list) else 1
+    return options
 
 
 def _coerce_call_result(response: Any, *, default_stream: bool) -> LLMCallResult:
