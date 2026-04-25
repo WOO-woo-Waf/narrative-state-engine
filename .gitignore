@@ -16,3 +16,4 @@ logs/
 *.jsonl
 novels_output/
 novels_input/
+node_modules/
