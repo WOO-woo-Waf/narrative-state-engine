@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from narrative_state_engine.domain import DomainState
+
 
 class IntentType(str, Enum):
     CONTINUE = "continue"
@@ -253,6 +255,7 @@ class NovelAgentState(BaseModel):
     draft: DraftCandidate = Field(default_factory=DraftCandidate)
     validation: ValidationState = Field(default_factory=ValidationState)
     commit: CommitDecision = Field(default_factory=CommitDecision)
+    domain: DomainState = Field(default_factory=DomainState)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod

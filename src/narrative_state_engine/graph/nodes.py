@@ -1,17 +1,41 @@
 from __future__ import annotations
 
 import re
+import os
 from datetime import datetime, timezone
 from dataclasses import dataclass, replace
 from typing import Protocol
 
+from narrative_state_engine.domain import (
+    AuthorConstraint,
+    AuthorPlotPlan,
+    CharacterCard,
+    CharacterConsistencyReport,
+    CharacterDynamicState,
+    CompressedMemoryBlock,
+    EvidencePack,
+    NarrativeEvidence,
+    NarrativeQuery,
+    NarrativeEvent,
+    PlotAlignmentReport,
+    PlotThreadState,
+    StyleDriftReport,
+    WorkingMemoryContext,
+)
 from narrative_state_engine.llm.client import NovelLLMConfig, has_llm_configuration, unified_text_llm
 from narrative_state_engine.llm.json_parsing import JsonBlobParser
 from narrative_state_engine.llm.prompts import build_draft_messages, build_extraction_messages
 from narrative_state_engine.logging import get_logger
 from narrative_state_engine.logging.context import set_action, set_actor
 from narrative_state_engine.memory.base import InMemoryMemoryStore, LongTermMemoryStore
-from narrative_state_engine.retrieval import EvidencePackBuilder
+from narrative_state_engine.embedding.client import HTTPEmbeddingProvider, HTTPReranker
+from narrative_state_engine.embedding.remote_service import RemoteEmbeddingServiceConfig, RemoteEmbeddingServiceManager
+from narrative_state_engine.embedding.batcher import EmbeddingBackfillService
+from narrative_state_engine.ingestion.generated_indexer import GeneratedContentIndexer
+from narrative_state_engine.retrieval import EvidencePackBuilder, NarrativeRetrievalService
+from narrative_state_engine.retrieval import RetrievalContextAssembler
+from narrative_state_engine.retrieval.evaluation import evaluate_retrieval_context
+from narrative_state_engine.retrieval.hybrid_search import HybridSearchService, HybridSearchResult, RetrievalCandidate
 from narrative_state_engine.models import (
     CommitStatus,
     DraftStructuredOutput,
@@ -40,6 +64,16 @@ DEFAULT_SNIPPET_QUOTAS = {
     "environment": 2,
     "dialogue": 3,
     "inner_monologue": 2,
+}
+
+DEFAULT_SECTION_BUDGETS_FOR_MEMORY = {
+    "author_constraints": 900,
+    "compressed_memory": 1400,
+    "plot_evidence": 1400,
+    "character_evidence": 1200,
+    "world_evidence": 900,
+    "style_evidence": 1200,
+    "scene_case_evidence": 900,
 }
 
 
@@ -112,13 +146,14 @@ class LLMDraftGenerator:
     def generate(self, state: NovelAgentState) -> DraftStructuredOutput:
         messages = build_draft_messages(state)
         interaction_context: dict[str, str] = {}
+        max_tokens = _draft_generation_max_tokens(self.config.max_tokens)
         response = unified_text_llm(
             messages,
             config=self.config,
             purpose="draft_generation",
             interaction_context=interaction_context,
             temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
+            max_tokens=max_tokens,
             top_p=self.config.top_p,
             presence_penalty=self.config.presence_penalty,
             frequency_penalty=self.config.frequency_penalty,
@@ -128,6 +163,7 @@ class LLMDraftGenerator:
         response_text = str(response)
         parsed = self.parser.parse(response_text)
         if not parsed.ok:
+            recovered = _recover_draft_from_malformed_json(response_text, state)
             trace = _record_llm_parse_trace(
                 state=state,
                 stage="draft_generation",
@@ -135,9 +171,17 @@ class LLMDraftGenerator:
                 response_text=response_text,
                 parsed=parsed,
                 model_name=self.config.model_name,
-                fallback="template",
+                fallback="content_recovery" if recovered is not None else "fail_fast",
                 interaction_id=str(interaction_context.get("interaction_id", "")),
             )
+            if recovered is not None:
+                state.metadata["draft_generation_recovered_from_malformed_json"] = True
+                state.metadata["draft_generation_recovery_trace_id"] = trace.get("trace_id")
+                logger.warning(
+                    "draft JSON parse failed, recovered content from malformed response: "
+                    f"trace_id={trace.get('trace_id')}"
+                )
+                return recovered
             raise ValueError(
                 "failed to parse draft JSON: "
                 f"{parsed.error}; trace_id={trace.get('trace_id')}"
@@ -158,6 +202,53 @@ class LLMDraftGenerator:
                 f"trace_id={trace.get('trace_id')} notes={parsed.repair_notes}"
             )
         return DraftStructuredOutput.model_validate(parsed.data)
+
+
+def _draft_generation_max_tokens(configured: int) -> int:
+    try:
+        override = int(os.getenv("NOVEL_AGENT_DRAFT_MAX_TOKENS", "2600") or 2600)
+    except Exception:
+        override = 2600
+    return max(int(configured or 0), override, 1200)
+
+
+def _recover_draft_from_malformed_json(response_text: str, state: NovelAgentState) -> DraftStructuredOutput | None:
+    content = _extract_json_like_string_field(response_text, "content")
+    if len(content.strip()) < 80:
+        return None
+    rationale = _extract_json_like_string_field(response_text, "rationale") or "Recovered from malformed draft JSON."
+    planned_beat = (
+        _extract_json_like_string_field(response_text, "planned_beat")
+        or str(state.metadata.get("planned_beat") or state.chapter.objective or "")
+    )
+    return DraftStructuredOutput(
+        content=content.strip(),
+        rationale=rationale.strip()[:500],
+        planned_beat=planned_beat.strip()[:240],
+        style_targets=list(state.style.rhetoric_preferences[:3]),
+        continuity_notes=[
+            "正文从格式错误的 JSON 响应中恢复，已避免使用模板兜底。",
+            "后续状态抽取仍需基于正文显式内容。",
+        ],
+    )
+
+
+def _extract_json_like_string_field(raw: str, field: str) -> str:
+    text = str(raw or "")
+    match = re.search(rf'"{re.escape(field)}"\s*:\s*"', text)
+    if not match:
+        return ""
+    start = match.end()
+    tail = text[start:]
+    next_field = re.search(
+        r'"\s*,\s*"(?:rationale|planned_beat|style_targets|continuity_notes)"\s*:',
+        tail,
+    )
+    value = tail[: next_field.start()] if next_field else tail
+    value = re.sub(r'"\s*[,}]\s*$', "", value, flags=re.DOTALL)
+    value = value.replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
+    value = value.replace('\\"', '"').replace("\\/", "/")
+    return value.strip()
 
 
 class RuleBasedInformationExtractor:
@@ -247,13 +338,14 @@ class LLMInformationExtractor:
     def extract(self, state: NovelAgentState) -> ExtractionStructuredOutput:
         messages = build_extraction_messages(state)
         interaction_context: dict[str, str] = {}
+        max_tokens = _state_extraction_max_tokens(self.config.max_tokens)
         response = unified_text_llm(
             messages,
             config=self.config,
             purpose="state_extraction",
             interaction_context=interaction_context,
             temperature=0,
-            max_tokens=800,
+            max_tokens=max_tokens,
             top_p=1,
             json_mode=True,
             stream=False,
@@ -293,6 +385,14 @@ class LLMInformationExtractor:
         return ExtractionStructuredOutput.model_validate(parsed.data)
 
 
+def _state_extraction_max_tokens(configured: int) -> int:
+    try:
+        override = int(os.getenv("NOVEL_AGENT_STATE_EXTRACTION_MAX_TOKENS", "4096") or 4096)
+    except Exception:
+        override = 4096
+    return max(int(configured or 0), override, 1200)
+
+
 @dataclass
 class NodeRuntime:
     memory_store: LongTermMemoryStore
@@ -301,6 +401,15 @@ class NodeRuntime:
     extractor: InformationExtractor
     repository: StoryStateRepository | None
     evidence_builder: EvidencePackBuilder
+    retrieval_service: NarrativeRetrievalService
+    retrieval_context_assembler: RetrievalContextAssembler
+    hybrid_search_service: HybridSearchService | None
+    remote_embedding_manager: RemoteEmbeddingServiceManager | None
+    generated_content_indexer: GeneratedContentIndexer | None
+    auto_index_generated_content: bool
+    auto_embed_generated_content: bool
+    embedding_url: str
+    stop_remote_embedding_after_use: bool
     max_repair_attempts: int
 
 
@@ -314,13 +423,56 @@ def make_runtime(
 ) -> NodeRuntime:
     llm_config = _resolve_llm_config(model_name=model_name)
     llm_enabled = has_llm_configuration(llm_config)
+    evidence_builder = EvidencePackBuilder(snippet_quotas=DEFAULT_SNIPPET_QUOTAS)
+    database_url = os.getenv("NOVEL_AGENT_DATABASE_URL", "").strip()
+    embedding_url = os.getenv("NOVEL_AGENT_VECTOR_STORE_URL", "").strip()
+    enable_pipeline_rag = _env_flag("NOVEL_AGENT_ENABLE_PIPELINE_RAG", default=False)
+    if os.getenv("PYTEST_CURRENT_TEST") and not _env_flag("NOVEL_AGENT_ALLOW_PIPELINE_RAG_IN_TESTS", default=False):
+        enable_pipeline_rag = False
+    hybrid_search_service = None
+    remote_embedding_manager = None
+    generated_content_indexer = None
+    stop_remote_embedding_after_use = _env_flag("NOVEL_AGENT_REMOTE_EMBEDDING_STOP_AFTER_USE", default=False)
+    in_pytest = bool(os.getenv("PYTEST_CURRENT_TEST"))
+    auto_index_generated_content = _env_flag(
+        "NOVEL_AGENT_AUTO_INDEX_GENERATED_CONTENT",
+        default=bool(database_url and not in_pytest),
+    )
+    auto_embed_generated_content = _env_flag(
+        "NOVEL_AGENT_AUTO_EMBED_GENERATED_CONTENT",
+        default=bool(database_url and embedding_url and not in_pytest),
+    )
+    if database_url and auto_index_generated_content:
+        generated_content_indexer = GeneratedContentIndexer(database_url=database_url)
+    if enable_pipeline_rag and database_url and embedding_url:
+        embedding_provider = HTTPEmbeddingProvider(base_url=embedding_url)
+        reranker = HTTPReranker(base_url=embedding_url)
+        hybrid_search_service = HybridSearchService(
+            database_url=database_url,
+            embedding_provider=embedding_provider,
+            reranker=reranker,
+            rerank_top_n=int(os.getenv("NOVEL_AGENT_RERANK_TOP_N", "30") or 30),
+        )
+        if _env_flag("NOVEL_AGENT_REMOTE_EMBEDDING_ON_DEMAND", default=False):
+            remote_embedding_manager = RemoteEmbeddingServiceManager(
+                RemoteEmbeddingServiceConfig.from_env(base_url=embedding_url)
+            )
     return NodeRuntime(
         memory_store=memory_store or InMemoryMemoryStore(),
         unit_of_work=unit_of_work or InMemoryUnitOfWork(),
         generator=generator or (LLMDraftGenerator(llm_config) if llm_enabled else TemplateDraftGenerator()),
         extractor=extractor or (LLMInformationExtractor(llm_config) if llm_enabled else RuleBasedInformationExtractor()),
         repository=repository,
-        evidence_builder=EvidencePackBuilder(snippet_quotas=DEFAULT_SNIPPET_QUOTAS),
+        evidence_builder=evidence_builder,
+        retrieval_service=NarrativeRetrievalService(evidence_builder=evidence_builder),
+        retrieval_context_assembler=RetrievalContextAssembler(),
+        hybrid_search_service=hybrid_search_service,
+        remote_embedding_manager=remote_embedding_manager,
+        generated_content_indexer=generated_content_indexer,
+        auto_index_generated_content=auto_index_generated_content,
+        auto_embed_generated_content=auto_embed_generated_content,
+        embedding_url=embedding_url,
+        stop_remote_embedding_after_use=stop_remote_embedding_after_use,
         max_repair_attempts=2,
     )
 
@@ -330,6 +482,13 @@ def _resolve_llm_config(*, model_name: str | None) -> NovelLLMConfig:
     if model_name and str(model_name).strip():
         return replace(config, model_name=str(model_name).strip())
     return config
+
+
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None or not str(value).strip():
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _record_llm_parse_trace(
@@ -540,6 +699,186 @@ def memory_retrieval(state: NovelAgentState, runtime: NodeRuntime) -> NovelAgent
     return state
 
 
+def domain_state_composer(state: NovelAgentState, _: NodeRuntime) -> NovelAgentState:
+    set_action("domain_state_composer")
+    if not state.domain.characters:
+        state.domain.characters = [
+            CharacterCard(
+                character_id=character.character_id,
+                name=character.name,
+                appearance_profile=list(character.appearance_profile),
+                current_goals=list(character.goals),
+                wounds_or_fears=list(character.fears),
+                knowledge_boundary=list(character.knowledge_boundary),
+                voice_profile=list(character.voice_profile),
+                dialogue_do=list(character.dialogue_patterns),
+                gesture_patterns=list(character.gesture_patterns),
+                stable_traits=list(character.voice_profile),
+            )
+            for character in state.story.characters
+        ]
+    if not state.domain.character_dynamic_states:
+        state.domain.character_dynamic_states = [
+            CharacterDynamicState(
+                character_id=character.character_id,
+                chapter_index=state.chapter.chapter_number,
+                active_goal=character.goals[0] if character.goals else "",
+                recent_changes=list(character.recent_changes),
+                arc_stage="runtime",
+            )
+            for character in state.story.characters
+        ]
+    if not state.domain.plot_threads:
+        state.domain.plot_threads = [
+            PlotThreadState(
+                thread_id=arc.thread_id,
+                name=arc.name,
+                status=arc.status,
+                stage=arc.stage,
+                stakes=arc.stakes,
+                open_questions=list(arc.open_questions),
+                anchor_events=list(arc.anchor_events),
+                next_expected_beats=[arc.next_expected_beat] if arc.next_expected_beat else [],
+            )
+            for arc in state.story.major_arcs
+        ]
+    if not state.domain.events:
+        state.domain.events = [
+            NarrativeEvent(
+                event_id=event.event_id,
+                event_type="canonical_event",
+                summary=event.summary,
+                chapter_index=event.chapter_number,
+                location_id=event.location or "",
+                participants=list(event.participants),
+                is_canonical=event.is_canonical,
+            )
+            for event in state.story.event_log
+        ]
+    _load_author_plan_from_metadata(state)
+    logger.info(
+        "domain state composed: "
+        f"characters={len(state.domain.characters)} "
+        f"plots={len(state.domain.plot_threads)} events={len(state.domain.events)}"
+    )
+    return state
+
+
+def _load_author_plan_from_metadata(state: NovelAgentState) -> None:
+    raw_plan = state.metadata.get("author_plan")
+    if raw_plan and not state.domain.author_plan.plan_id:
+        try:
+            plan_payload = dict(raw_plan) if isinstance(raw_plan, dict) else {"author_goal": str(raw_plan)}
+            plan_payload.setdefault("plan_id", f"author-plan-{state.story.story_id}")
+            plan_payload.setdefault("story_id", state.story.story_id)
+            state.domain.author_plan = AuthorPlotPlan.model_validate(plan_payload)
+        except Exception as exc:
+            state.metadata["author_plan_parse_error"] = str(exc)
+
+    raw_constraints = state.metadata.get("author_constraints", [])
+    if raw_constraints and not state.domain.author_constraints:
+        constraints: list[AuthorConstraint] = []
+        for idx, item in enumerate(raw_constraints, start=1):
+            try:
+                payload = dict(item) if isinstance(item, dict) else {"text": str(item)}
+                payload.setdefault("constraint_id", f"author-constraint-{idx:03d}")
+                payload.setdefault("constraint_type", "general")
+                constraints.append(AuthorConstraint.model_validate(payload))
+            except Exception:
+                continue
+        state.domain.author_constraints = constraints
+
+    plan = state.domain.author_plan
+    generated: list[AuthorConstraint] = []
+    for idx, beat in enumerate(plan.required_beats, start=1):
+        generated.append(
+            AuthorConstraint(
+                constraint_id=f"{plan.plan_id or 'author-plan'}-required-{idx:03d}",
+                constraint_type="required_beat",
+                text=str(beat),
+                status="confirmed",
+                violation_policy="warn",
+            )
+        )
+    for idx, beat in enumerate(plan.forbidden_beats, start=1):
+        generated.append(
+            AuthorConstraint(
+                constraint_id=f"{plan.plan_id or 'author-plan'}-forbidden-{idx:03d}",
+                constraint_type="forbidden_beat",
+                text=str(beat),
+                status="confirmed",
+                violation_policy="block_commit",
+            )
+        )
+    existing_ids = {item.constraint_id for item in state.domain.author_constraints}
+    state.domain.author_constraints.extend(
+        item for item in generated if item.constraint_id not in existing_ids
+    )
+
+
+def author_plan_retrieval(state: NovelAgentState, _: NodeRuntime) -> NovelAgentState:
+    set_action("author_plan_retrieval")
+    chapter_no = state.chapter.chapter_number
+    selected: list[AuthorConstraint] = []
+    active_character_ids = {state.chapter.pov_character_id or ""}
+    active_character_ids.update(character.character_id for character in state.story.characters[:3])
+    active_thread_ids = {thread.thread_id for thread in state.domain.plot_threads[:3]}
+
+    for constraint in state.domain.author_constraints:
+        if constraint.status != "confirmed":
+            continue
+        if constraint.applies_to_chapters and chapter_no not in constraint.applies_to_chapters:
+            continue
+        if constraint.applies_to_characters and not active_character_ids.intersection(constraint.applies_to_characters):
+            continue
+        if constraint.applies_to_threads and not active_thread_ids.intersection(constraint.applies_to_threads):
+            continue
+        selected.append(constraint)
+
+    state.metadata["active_author_constraints"] = [
+        item.model_dump(mode="json") for item in selected
+    ]
+    logger.info(f"active author constraints: {len(selected)}")
+    return state
+
+
+def domain_context_builder(state: NovelAgentState, _: NodeRuntime) -> NovelAgentState:
+    set_action("domain_context_builder")
+    active_constraints = [
+        AuthorConstraint.model_validate(item)
+        for item in state.metadata.get("active_author_constraints", [])
+        if isinstance(item, dict)
+    ]
+    context_sections = {
+        "author_constraints": "；".join(item.text for item in active_constraints[:8]),
+        "compressed_memory": "；".join(
+            item.summary for item in state.domain.compressed_memory[:4] if item.summary
+        )[:2400],
+        "character_cards": "；".join(
+            f"{item.name}:{','.join(item.voice_profile[:3])}"
+            for item in state.domain.characters[:8]
+        ),
+        "plot_threads": "；".join(
+            f"{item.name}:{','.join(item.next_expected_beats[:2]) or item.stakes}"
+            for item in state.domain.plot_threads[:6]
+        ),
+    }
+    state.domain.working_memory = WorkingMemoryContext(
+        context_id=f"wm-{state.thread.request_id or state.thread.thread_id}",
+        request_id=state.thread.request_id,
+        token_budget=0,
+        selected_memory_ids=[item.block_id for item in state.domain.compressed_memory[:8]],
+        selected_author_constraints=[item.constraint_id for item in active_constraints],
+        context_sections={key: value for key, value in context_sections.items() if value},
+    )
+    state.metadata["domain_context_sections"] = dict(state.domain.working_memory.context_sections)
+    logger.info(
+        "domain context built: "
+        f"sections={len(state.domain.working_memory.context_sections)}"
+    )
+    return state
+
+
 def state_composer(state: NovelAgentState, _: NodeRuntime) -> NovelAgentState:
     set_action("state_composer")
     fragments = [
@@ -585,12 +924,73 @@ def evidence_retrieval(state: NovelAgentState, runtime: NodeRuntime) -> NovelAge
         except Exception as exc:
             logger.warning(f"load evidence from repository failed, fallback to state assets: {exc}")
 
-    evidence_pack = runtime.evidence_builder.build(
+    narrative_query = _build_narrative_query_for_state(state)
+    evidence_pack, structured_pack = runtime.retrieval_service.retrieve(
         state,
         snippets=snippets,
         event_cases=event_cases,
+        query=narrative_query,
     )
+    hybrid_result: HybridSearchResult | None = None
+    if runtime.hybrid_search_service is not None:
+        if runtime.remote_embedding_manager is not None:
+            runtime.remote_embedding_manager.ensure_running()
+        try:
+            hybrid_result = runtime.hybrid_search_service.search(
+                story_id=state.story.story_id,
+                query_text=_build_pipeline_query_text(state),
+                characters=[character.character_id for character in state.story.characters[:6]],
+                plot_threads=[thread.thread_id for thread in state.story.major_arcs[:4]],
+                limit=int(state.metadata.get("retrieval_limit", 24) or 24),
+                log_run=True,
+            )
+            _merge_hybrid_search_into_pack(structured_pack, hybrid_result)
+        except Exception as exc:
+            structured_pack.retrieval_trace.append(
+                {
+                    "stage": "hybrid_search",
+                    "status": "failed",
+                    "reason": str(exc),
+                }
+            )
+            logger.warning(f"hybrid retrieval failed, using structured evidence only: {exc}")
+        finally:
+            if runtime.remote_embedding_manager is not None and runtime.stop_remote_embedding_after_use:
+                runtime.remote_embedding_manager.stop()
     state.analysis.evidence_pack = evidence_pack
+    state.domain.evidence_pack = structured_pack
+    state.domain.working_memory = runtime.retrieval_context_assembler.assemble(state, structured_pack)
+    retrieval_eval = evaluate_retrieval_context(
+        state=state,
+        query=narrative_query,
+        evidence_pack=structured_pack,
+        working_memory=state.domain.working_memory,
+        hybrid_result=hybrid_result,
+    )
+    state.domain.retrieval_evaluation_report = retrieval_eval
+    state.domain.reports["retrieval_evaluation"] = retrieval_eval.model_dump(mode="json")
+    state.metadata["retrieval_evaluation_report"] = retrieval_eval.model_dump(mode="json")
+    state.metadata["domain_context_sections"] = dict(state.domain.working_memory.context_sections)
+    state.metadata["retrieval_context"] = {
+        "context_id": state.domain.working_memory.context_id,
+        "token_budget": state.domain.working_memory.token_budget,
+        "selected_evidence_ids": list(state.domain.working_memory.selected_evidence_ids),
+        "selected_author_constraints": list(state.domain.working_memory.selected_author_constraints),
+        "hybrid_candidate_counts": dict(hybrid_result.candidate_counts) if hybrid_result else {},
+        "hybrid_selected_source_types": _hybrid_source_type_counts(hybrid_result) if hybrid_result else {},
+        "evaluation_status": retrieval_eval.status,
+        "evaluation_score": retrieval_eval.overall_score,
+        "evaluation_weak_spots": list(retrieval_eval.weak_spots),
+        "sections": [
+            {
+                "section_id": section.section_id,
+                "token_estimate": section.token_estimate,
+                "evidence_ids": list(section.evidence_ids),
+                "omissions": list(section.omissions),
+            }
+            for section in state.domain.working_memory.sections
+        ],
+    }
     state.analysis.retrieved_snippet_ids = list(evidence_pack.get("retrieved_snippet_ids", []))
     state.analysis.retrieved_case_ids = list(evidence_pack.get("retrieved_case_ids", []))
 
@@ -604,9 +1004,129 @@ def evidence_retrieval(state: NovelAgentState, runtime: NodeRuntime) -> NovelAge
         "evidence pack built: "
         f"snippets={len(state.analysis.retrieved_snippet_ids)} "
         f"cases={len(state.analysis.retrieved_case_ids)} "
+        f"hybrid={dict(hybrid_result.candidate_counts) if hybrid_result else {}} "
         f"quota_hit=[{', '.join(style_summary)}]"
     )
     return state
+
+
+def _build_narrative_query_for_state(state: NovelAgentState) -> NarrativeQuery:
+    return NarrativeQuery(
+        query_id=f"pipeline-query-{state.thread.request_id or state.thread.thread_id}",
+        query_text=_build_pipeline_query_text(state),
+        query_type="continuation_generation",
+        target_chapter_index=state.chapter.chapter_number,
+        scene_type=state.chapter.scene_cards[0] if state.chapter.scene_cards else "",
+        pov_character_id=state.chapter.pov_character_id,
+        involved_character_ids=[character.character_id for character in state.story.characters[:8]],
+        plot_thread_ids=[thread.thread_id for thread in state.story.major_arcs[:6]],
+        token_budget=int(state.metadata.get("retrieval_token_budget", 4800) or 4800),
+    )
+
+
+def _build_pipeline_query_text(state: NovelAgentState) -> str:
+    blueprint = _active_chapter_blueprint(state)
+    pieces = [
+        state.thread.user_input,
+        state.chapter.objective,
+        state.chapter.latest_summary,
+        str(state.metadata.get("planned_beat", "")),
+        " ".join(state.chapter.open_questions[:5]),
+        " ".join(state.chapter.scene_cards[:5]),
+        " ".join(state.memory.plot[:5]),
+        " ".join(state.domain.author_plan.major_plot_spine[:8]),
+        " ".join(state.domain.author_plan.required_beats[:8]),
+        " ".join(blueprint.required_beats[:8]) if blueprint else "",
+        blueprint.chapter_goal if blueprint else "",
+        blueprint.pacing_target if blueprint else "",
+        " ".join(constraint.text for constraint in state.domain.author_constraints if constraint.status == "confirmed"),
+    ]
+    return " ".join(piece for piece in pieces if str(piece).strip()) or state.thread.user_input or state.story.premise
+
+
+def _active_chapter_blueprint(state: NovelAgentState):
+    for blueprint in state.domain.chapter_blueprints:
+        if blueprint.chapter_index == state.chapter.chapter_number:
+            return blueprint
+    return state.domain.chapter_blueprints[-1] if state.domain.chapter_blueprints else None
+
+
+def _merge_hybrid_search_into_pack(pack: EvidencePack, result: HybridSearchResult) -> None:
+    pack.retrieval_trace.append(
+        {
+            "stage": "hybrid_search",
+            "status": "succeeded",
+            "candidate_counts": dict(result.candidate_counts),
+            "latency_ms": result.latency_ms,
+        }
+    )
+    for candidate in result.candidates:
+        evidence = _candidate_to_narrative_evidence(candidate)
+        target = _hybrid_target_bucket(pack, evidence)
+        existing_idx = next(
+            (idx for idx, item in enumerate(target) if item.evidence_id == evidence.evidence_id),
+            None,
+        )
+        if existing_idx is None:
+            target.append(evidence)
+            continue
+        current = target[existing_idx]
+        merged = current.model_copy(deep=True)
+        merged.score_vector = max(merged.score_vector, evidence.score_vector)
+        merged.score_structural = max(merged.score_structural, evidence.score_structural)
+        merged.final_score = max(merged.final_score, evidence.final_score)
+        merged.metadata = {**merged.metadata, **evidence.metadata, "hybrid_merged": True}
+        target[existing_idx] = merged
+
+
+def _candidate_to_narrative_evidence(candidate: RetrievalCandidate) -> NarrativeEvidence:
+    source_type = str(candidate.metadata.get("source_type", "") or "")
+    return NarrativeEvidence(
+        evidence_id=candidate.evidence_id,
+        evidence_type=candidate.evidence_type,
+        source=f"hybrid_search:{source_type or candidate.source_table}",
+        text=candidate.text,
+        usage_hint=_usage_hint_for_source_type(source_type),
+        chapter_index=candidate.chapter_index,
+        score_vector=float(candidate.scores.get("vector", 0.0) or 0.0),
+        score_structural=float(
+            max(
+                candidate.scores.get("structured", 0.0) or 0.0,
+                candidate.scores.get("keyword", 0.0) or 0.0,
+            )
+        ),
+        final_score=float(candidate.final_score or 0.0),
+        metadata={**candidate.metadata, "rank_sources": dict(candidate.rank_sources), "scores": dict(candidate.scores)},
+    )
+
+
+def _usage_hint_for_source_type(source_type: str) -> str:
+    if source_type == "target_continuation":
+        return "main_continuity_source"
+    if source_type == "crossover_linkage":
+        return "crossover_character_or_plot_source"
+    if source_type == "same_author_world_style":
+        return "same_author_style_and_world_reference"
+    return "retrieved_source_chunk"
+
+
+def _hybrid_target_bucket(pack: EvidencePack, evidence: NarrativeEvidence) -> list[NarrativeEvidence]:
+    source_type = str(evidence.metadata.get("source_type", "") or "")
+    if source_type == "same_author_world_style":
+        return pack.style_evidence
+    if source_type in {"target_continuation", "crossover_linkage"}:
+        return pack.plot_evidence
+    return pack.scene_case_evidence
+
+
+def _hybrid_source_type_counts(result: HybridSearchResult | None) -> dict[str, int]:
+    if result is None:
+        return {}
+    counts: dict[str, int] = {}
+    for candidate in result.candidates:
+        source_type = str(candidate.metadata.get("source_type", "") or "unknown")
+        counts[source_type] = counts.get(source_type, 0) + 1
+    return counts
 
 
 def draft_generator(state: NovelAgentState, runtime: NodeRuntime) -> NovelAgentState:
@@ -615,6 +1135,18 @@ def draft_generator(state: NovelAgentState, runtime: NodeRuntime) -> NovelAgentS
         draft_output = runtime.generator.generate(state)
     except Exception as exc:
         trace = _latest_parse_failure_trace(state, "draft_generation")
+        allow_template_fallback = _env_flag("NOVEL_AGENT_ALLOW_TEMPLATE_FALLBACK", default=False)
+        if not allow_template_fallback:
+            if trace:
+                logger.error(
+                    "structured draft generation failed; template fallback disabled for formal generation: "
+                    f"{exc}; trace_id={trace.get('trace_id')} "
+                    f"line={trace.get('error_line')} col={trace.get('error_column')} "
+                    f"likely_causes={trace.get('likely_causes')}"
+                )
+            else:
+                logger.error(f"draft generation failed; template fallback disabled: {exc}")
+            raise
         if trace:
             logger.warning(
                 "structured draft generation failed, falling back to template: "
@@ -666,6 +1198,16 @@ def information_extractor(state: NovelAgentState, runtime: NodeRuntime) -> Novel
     state.draft.extracted_updates = list(extraction_output.accepted_updates)
     state.thread.pending_changes = list(extraction_output.accepted_updates)
     state.metadata["extraction_notes"] = list(extraction_output.notes)
+    if state.draft.content.strip() and not state.thread.pending_changes:
+        fallback_output = RuleBasedInformationExtractor().extract(state)
+        state.draft.extracted_updates = list(fallback_output.accepted_updates)
+        state.thread.pending_changes = list(fallback_output.accepted_updates)
+        state.metadata["extraction_notes"].extend(
+            [
+                "Structured extraction returned no state changes; rule-based fallback supplied baseline event and plot progress.",
+                *fallback_output.notes,
+            ]
+        )
     logger.info(f"extracted {len(state.thread.pending_changes)} candidate updates")
     return state
 
@@ -1013,6 +1555,170 @@ def _detect_negative_style_rule_violations(state: NovelAgentState) -> list[dict[
     return violations
 
 
+def character_consistency_evaluator(state: NovelAgentState, _: NodeRuntime) -> NovelAgentState:
+    set_action("character_consistency_evaluator")
+    issues: list[dict[str, str]] = []
+    draft_text = state.draft.content or ""
+    change_text = " ".join(
+        f"{change.summary} {change.details}" for change in state.thread.pending_changes
+    )
+
+    for card in state.domain.characters:
+        for marker in card.forbidden_actions:
+            if marker and marker in draft_text:
+                issues.append(
+                    {
+                        "character_id": card.character_id,
+                        "issue_type": "forbidden_action",
+                        "severity": "error",
+                        "evidence": marker,
+                        "expected_constraint": "角色不应执行禁用行为。",
+                        "suggested_repair": f"移除或改写 `{marker}` 对应行为。",
+                    }
+                )
+        for marker in card.dialogue_do_not:
+            if marker and marker in draft_text:
+                issues.append(
+                    {
+                        "character_id": card.character_id,
+                        "issue_type": "forbidden_dialogue_pattern",
+                        "severity": "error",
+                        "evidence": marker,
+                        "expected_constraint": "角色台词不应触发禁用说话模式。",
+                        "suggested_repair": f"改写 `{marker}` 对应台词。",
+                    }
+                )
+        for boundary in card.knowledge_boundary:
+            if boundary and boundary in change_text:
+                issues.append(
+                    {
+                        "character_id": card.character_id,
+                        "issue_type": "knowledge_boundary",
+                        "severity": "error",
+                        "evidence": boundary,
+                        "expected_constraint": "角色不能越过已确认知识边界。",
+                        "suggested_repair": "把该信息改为未确认线索或延后揭示。",
+                    }
+                )
+
+    status = "failed" if any(item["severity"] == "error" for item in issues) else "passed"
+    score = max(0.0, 1.0 - 0.2 * len(issues))
+    report = CharacterConsistencyReport(
+        report_id=f"character-report-{state.thread.request_id or state.thread.thread_id}",
+        draft_id=state.thread.request_id,
+        status=status,
+        overall_score=round(score, 4),
+        issues=issues,
+        repair_hints=[item["suggested_repair"] for item in issues[:6]],
+    )
+    state.domain.character_consistency_report = report
+    state.domain.reports["character_consistency"] = report.model_dump(mode="json")
+    state.metadata["character_consistency_report"] = report.model_dump(mode="json")
+
+    for item in issues:
+        if item["severity"] != "error":
+            continue
+        state.validation.consistency_issues.append(
+            ValidationIssue(
+                code=f"character_{item['issue_type']}",
+                severity="error",
+                message=(
+                    f"角色 `{item['character_id']}` 一致性问题: "
+                    f"{item['expected_constraint']} 证据: {item['evidence']}"
+                ),
+                related_entity_id=item["character_id"],
+            )
+        )
+    logger.info(f"character consistency status: {status} issues={len(issues)}")
+    return state
+
+
+def plot_alignment_evaluator(state: NovelAgentState, _: NodeRuntime) -> NovelAgentState:
+    set_action("plot_alignment_evaluator")
+    active_constraints = [
+        AuthorConstraint.model_validate(item)
+        for item in state.metadata.get("active_author_constraints", [])
+        if isinstance(item, dict)
+    ]
+    if not active_constraints and state.domain.author_constraints:
+        active_constraints = list(state.domain.author_constraints)
+
+    target_text = _draft_and_change_text(state)
+    required = [item for item in active_constraints if item.constraint_type == "required_beat"]
+    forbidden = [item for item in active_constraints if item.constraint_type == "forbidden_beat"]
+    required_hit = [item.text for item in required if item.text and item.text in target_text]
+    required_missing = [item.text for item in required if item.text and item.text not in target_text]
+    forbidden_hit = [item.text for item in forbidden if item.text and item.text in target_text]
+
+    repair_hints: list[str] = []
+    for text in required_missing[:4]:
+        repair_hints.append(f"补入作者要求的剧情点：{text}")
+    for text in forbidden_hit[:4]:
+        repair_hints.append(f"移除作者禁止的剧情点：{text}")
+
+    report = PlotAlignmentReport(
+        report_id=f"plot-report-{state.thread.request_id or state.thread.thread_id}",
+        draft_id=state.thread.request_id,
+        author_plan_score=_plot_alignment_score(required, required_hit, forbidden_hit),
+        required_beats_hit=required_hit,
+        required_beats_missing=required_missing,
+        forbidden_beats_hit=forbidden_hit,
+        plot_thread_progress={
+            change.change_id: min(max(float(change.confidence), 0.0), 1.0)
+            for change in state.thread.pending_changes
+            if change.update_type in {UpdateType.PLOT_PROGRESS, UpdateType.EVENT}
+        },
+        repair_hints=repair_hints,
+    )
+    state.domain.plot_alignment_report = report
+    state.domain.reports["plot_alignment"] = report.model_dump(mode="json")
+    state.metadata["plot_alignment_report"] = report.model_dump(mode="json")
+
+    for text in forbidden_hit:
+        state.validation.consistency_issues.append(
+            ValidationIssue(
+                code="author_forbidden_beat",
+                severity="error",
+                message=f"生成内容触发作者禁止剧情点: {text}",
+            )
+        )
+    blocking_required = {
+        item.text
+        for item in required
+        if item.violation_policy == "block_commit" and item.text in required_missing
+    }
+    for text in required_missing:
+        severity = "error" if text in blocking_required else "warning"
+        state.validation.consistency_issues.append(
+            ValidationIssue(
+                code="author_required_beat_missing",
+                severity=severity,
+                message=f"生成内容缺少作者要求剧情点: {text}",
+            )
+        )
+    logger.info(
+        "plot alignment: "
+        f"required_missing={len(required_missing)} forbidden_hit={len(forbidden_hit)}"
+    )
+    return state
+
+
+def _draft_and_change_text(state: NovelAgentState) -> str:
+    parts = [state.draft.content or ""]
+    parts.extend(f"{change.summary} {change.details}" for change in state.thread.pending_changes)
+    return " ".join(parts)
+
+
+def _plot_alignment_score(
+    required: list[AuthorConstraint],
+    required_hit: list[str],
+    forbidden_hit: list[str],
+) -> float:
+    required_score = 1.0 if not required else len(required_hit) / max(len(required), 1)
+    penalty = min(len(forbidden_hit) * 0.35, 1.0)
+    return round(max(required_score - penalty, 0.0), 4)
+
+
 def style_evaluator(state: NovelAgentState, _: NodeRuntime) -> NovelAgentState:
     set_action("style_evaluator")
     issues: list[ValidationIssue] = []
@@ -1044,6 +1750,19 @@ def style_evaluator(state: NovelAgentState, _: NodeRuntime) -> NovelAgentState:
             )
         )
 
+    style_report = _build_style_drift_report(state)
+    state.domain.style_drift_report = style_report
+    state.domain.reports["style_drift"] = style_report.model_dump(mode="json")
+    state.metadata["style_drift_report"] = style_report.model_dump(mode="json")
+    if style_report.overall_style_score < 0.45:
+        issues.append(
+            ValidationIssue(
+                code="style_drift_warning",
+                severity="warning",
+                message="生成内容与原风格画像存在明显偏移。",
+            )
+        )
+
     state.validation.style_issues = issues
     blocking = any(issue.severity == "error" for issue in state.validation.consistency_issues)
     if blocking:
@@ -1057,6 +1776,78 @@ def style_evaluator(state: NovelAgentState, _: NodeRuntime) -> NovelAgentState:
         state.validation.requires_human_review = False
     logger.info(f"style evaluation status: {state.validation.status.value}")
     return state
+
+
+def _build_style_drift_report(state: NovelAgentState) -> StyleDriftReport:
+    content = state.draft.content or ""
+    sentences = [item for item in re.split(r"(?<=[。！？!?])", content) if item.strip()]
+    sentence_lengths = [len(item.strip()) for item in sentences]
+    avg_sentence_len = sum(sentence_lengths) / max(len(sentence_lengths), 1)
+    target_distribution = state.style.sentence_length_distribution or {}
+    target_short_ratio = float(target_distribution.get("short", 0.0) or 0.0)
+    actual_short_ratio = len([item for item in sentence_lengths if item <= 20]) / max(len(sentence_lengths), 1)
+    sentence_delta = round(abs(actual_short_ratio - target_short_ratio), 4) if target_distribution else 0.0
+
+    dialogue_count = len(re.findall(r"[“\"].*?[”\"]", content))
+    dialogue_ratio = dialogue_count / max(len(sentences), 1)
+    dialogue_delta = round(abs(dialogue_ratio - float(state.style.dialogue_ratio or 0.0)), 4)
+
+    lexical = [item for item in state.style.lexical_fingerprint if item]
+    lexical_hits = [item for item in lexical if item in content]
+    lexical_score = len(lexical_hits) / max(len(lexical), 1) if lexical else 1.0
+
+    rhetoric = [item for item in state.style.rhetoric_markers if item]
+    rhetoric_hits = _style_rhetoric_hits(content, rhetoric)
+    rhetoric_score = len(rhetoric_hits) / max(len(rhetoric), 1) if rhetoric else 1.0
+
+    forbidden_hits = [
+        item for item in state.style.forbidden_patterns + state.style.negative_style_rules if item and item in content
+    ]
+    score = 1.0
+    score -= min(sentence_delta, 0.35)
+    score -= min(dialogue_delta, 0.35)
+    score -= (1.0 - lexical_score) * 0.15
+    score -= (1.0 - rhetoric_score) * 0.15
+    score -= min(len(forbidden_hits) * 0.2, 0.4)
+    score = max(score, 0.0)
+
+    hints: list[str] = []
+    if avg_sentence_len > 70:
+        hints.append("缩短长句，增加短句收束。")
+    if dialogue_delta > 0.25:
+        hints.append("调整对话比例，使其贴近原文风格画像。")
+    if lexical and lexical_score < 0.2:
+        hints.append("适当恢复原文词汇指纹中的高频表达。")
+    if forbidden_hits:
+        hints.append("移除命中的禁止风格模式。")
+
+    return StyleDriftReport(
+        report_id=f"style-report-{state.thread.request_id or state.thread.thread_id}",
+        draft_id=state.thread.request_id,
+        overall_style_score=round(score, 4),
+        sentence_length_delta=sentence_delta,
+        dialogue_ratio_delta=dialogue_delta,
+        description_mix_delta={},
+        lexical_overlap_score=round(lexical_score, 4),
+        rhetoric_match_score=round(rhetoric_score, 4),
+        forbidden_pattern_hits=forbidden_hits,
+        repair_hints=hints,
+    )
+
+
+def _style_rhetoric_hits(content: str, markers: list[str]) -> list[str]:
+    hits: list[str] = []
+    marker_map = {
+        "simile": ["像", "仿佛", "好似"],
+        "question_ending": ["？", "?"],
+        "pause_emphasis": ["……", "..."],
+        "turning": ["忽然", "突然", "却", "但"],
+    }
+    for marker in markers:
+        patterns = marker_map.get(marker, [marker])
+        if any(pattern in content for pattern in patterns):
+            hits.append(marker)
+    return hits
 
 
 def repair_loop(state: NovelAgentState, runtime: NodeRuntime) -> NovelAgentState:
@@ -1076,6 +1867,8 @@ def repair_loop(state: NovelAgentState, runtime: NodeRuntime) -> NovelAgentState
         _apply_rule_based_repair_to_draft(state)
         state = information_extractor(state, runtime)
         state = consistency_validator(state, runtime)
+        state = character_consistency_evaluator(state, runtime)
+        state = plot_alignment_evaluator(state, runtime)
         state = style_evaluator(state, runtime)
 
         history.append(
@@ -1172,3 +1965,283 @@ def commit_or_rollback(state: NovelAgentState, runtime: NodeRuntime) -> NovelAge
     runtime.memory_store.persist_validated_state(state)
     logger.info(f"state committed with {len(state.commit.accepted_changes)} accepted changes")
     return state
+
+
+def memory_compressor(state: NovelAgentState, runtime: NodeRuntime) -> NovelAgentState:
+    set_action("memory_compressor")
+    if state.commit.status != CommitStatus.COMMITTED:
+        state.metadata["memory_compression_skipped"] = state.commit.status.value
+        return state
+
+    preserved_ids = [change.change_id for change in state.commit.accepted_changes]
+    if not preserved_ids and not state.draft.content.strip():
+        state.metadata["memory_compression_skipped"] = "no_committed_content"
+        return state
+
+    summary_parts = [change.summary for change in state.commit.accepted_changes if change.summary]
+    if not summary_parts and state.draft.planned_beat:
+        summary_parts.append(state.draft.planned_beat)
+    if not summary_parts:
+        summary_parts.append((state.draft.content or "").replace("\n", " ")[:240])
+
+    block_id = f"commit-memory-{state.thread.request_id or state.thread.thread_id}"
+    existing = {item.block_id for item in state.domain.compressed_memory}
+    if block_id not in existing:
+        state.domain.compressed_memory.append(
+            CompressedMemoryBlock(
+                block_id=block_id,
+                block_type="committed_increment",
+                scope=f"chapter:{state.chapter.chapter_number}",
+                summary="; ".join(summary_parts)[:1200],
+                key_points=summary_parts[:8],
+                preserved_ids=preserved_ids,
+                dropped_ids=[],
+                compression_ratio=_rough_compression_ratio(state.draft.content, summary_parts),
+                valid_until_state_version=_safe_int(state.metadata.get("state_version_no")),
+            )
+        )
+
+    state.domain.memory_compression.rolling_story_summary = _rolling_story_summary(state)
+    state.domain.memory_compression.recent_chapter_summaries = _recent_chapter_summaries(state)
+    state.domain.memory_compression.active_plot_memory = _active_plot_memory(state)
+    state.domain.memory_compression.active_character_memory = _active_character_memory(state)
+    state.domain.memory_compression.active_style_memory = _active_style_memory(state)
+    state.domain.memory_compression.unresolved_threads = _unresolved_thread_memory(state)
+    state.domain.memory_compression.foreshadowing_memory = _foreshadowing_memory(state)
+    state.domain.memory_compression.author_constraints_memory = _author_constraints_memory(state)
+    state.domain.memory_compression.retrieval_budget = dict(DEFAULT_SECTION_BUDGETS_FOR_MEMORY)
+    state.domain.memory_compression.last_compressed_state_version_no = _safe_int(
+        state.metadata.get("state_version_no")
+    )
+    state.domain.memory_compression.compression_trace.append(
+        {
+            "block_id": block_id,
+            "status": "updated",
+            "preserved_ids": preserved_ids,
+            "chapter_number": state.chapter.chapter_number,
+            "committed_change_count": len(state.commit.accepted_changes),
+        }
+    )
+
+    for change in state.commit.accepted_changes:
+        event_id = change.change_id
+        if event_id in {item.event_id for item in state.domain.events}:
+            continue
+        if change.update_type in {UpdateType.EVENT, UpdateType.PLOT_PROGRESS}:
+            state.domain.events.append(
+                NarrativeEvent(
+                    event_id=event_id,
+                    event_type=change.update_type.value,
+                    summary=change.summary,
+                    chapter_index=state.chapter.chapter_number,
+                    participants=[
+                        ref.entity_id for ref in change.related_entities if ref.entity_type == "character"
+                    ],
+                    plot_thread_ids=[
+                        ref.entity_id for ref in change.related_entities if ref.entity_type == "plot_thread"
+                    ],
+                    is_canonical=True,
+                )
+            )
+
+    state.metadata["memory_compression_last_block_id"] = block_id
+    _index_generated_content_after_commit(state, runtime)
+    logger.info(f"memory compressed: block_id={block_id}")
+    return state
+
+
+def _index_generated_content_after_commit(state: NovelAgentState, runtime: NodeRuntime) -> None:
+    if not runtime.auto_index_generated_content or runtime.generated_content_indexer is None:
+        state.metadata["generated_content_index_skipped"] = "disabled"
+        return
+    if not (state.draft.content or "").strip():
+        state.metadata["generated_content_index_skipped"] = "empty_draft"
+        return
+    try:
+        result = runtime.generated_content_indexer.index_state_draft(state)
+    except Exception as exc:
+        state.metadata["generated_content_index_error"] = str(exc)
+        logger.warning(f"generated content indexing failed: {exc}")
+        return
+    if result is None:
+        state.metadata["generated_content_index_skipped"] = "empty_draft"
+        return
+
+    payload = {
+        "story_id": result.story_id,
+        "document_id": result.document_id,
+        "chapter_id": result.chapter_id,
+        "chunk_count": result.chunk_count,
+        "text_hash": result.text_hash,
+        "embedding": "pending",
+    }
+    state.metadata["generated_content_index"] = payload
+    if not runtime.auto_embed_generated_content or not runtime.embedding_url:
+        return
+
+    manager = runtime.remote_embedding_manager
+    if manager is None and _env_flag("NOVEL_AGENT_REMOTE_EMBEDDING_ON_DEMAND", default=False):
+        manager = RemoteEmbeddingServiceManager(
+            RemoteEmbeddingServiceConfig.from_env(base_url=runtime.embedding_url)
+        )
+    try:
+        if manager is not None:
+            manager.ensure_running()
+        service = EmbeddingBackfillService(
+            database_url=os.getenv("NOVEL_AGENT_DATABASE_URL", "").strip(),
+            provider=HTTPEmbeddingProvider(base_url=runtime.embedding_url),
+            batch_size=int(os.getenv("NOVEL_AGENT_GENERATED_EMBED_BATCH_SIZE", "16") or 16),
+        )
+        results = service.backfill_story(state.story.story_id, limit=max(result.chunk_count * 2 + 4, 8))
+        payload["embedding"] = "updated"
+        payload["embedding_results"] = [item.__dict__ for item in results]
+    except Exception as exc:
+        payload["embedding"] = "failed"
+        payload["embedding_error"] = str(exc)
+        logger.warning(f"generated content embedding failed: {exc}")
+    finally:
+        if manager is not None and runtime.stop_remote_embedding_after_use:
+            try:
+                manager.stop()
+            except Exception:
+                pass
+
+
+def _rough_compression_ratio(content: str, summary_parts: list[str]) -> float:
+    source_len = len(content or "")
+    compressed_len = len("".join(summary_parts))
+    if source_len <= 0:
+        return 0.0
+    return round(min(compressed_len / source_len, 1.0), 4)
+
+
+def _rolling_story_summary(state: NovelAgentState) -> str:
+    summaries = [block.summary for block in state.domain.compressed_memory if block.summary]
+    if state.chapter.latest_summary:
+        summaries.append(state.chapter.latest_summary)
+    return " ".join(summaries[-8:])[:4000]
+
+
+def _recent_chapter_summaries(state: NovelAgentState) -> list[dict]:
+    rows = []
+    if state.chapter.latest_summary:
+        rows.append(
+            {
+                "chapter_number": state.chapter.chapter_number,
+                "summary": state.chapter.latest_summary,
+                "source": "chapter.latest_summary",
+            }
+        )
+    for block in state.domain.compressed_memory[-6:]:
+        if block.scope.startswith("chapter:") and block.summary:
+            rows.append(
+                {
+                    "chapter_number": _safe_int(block.scope.split(":", 1)[-1]),
+                    "summary": block.summary,
+                    "source": block.block_id,
+                }
+            )
+    return rows[-8:]
+
+
+def _active_plot_memory(state: NovelAgentState) -> list[dict]:
+    rows = []
+    for thread in state.domain.plot_threads[:12]:
+        rows.append(
+            {
+                "thread_id": thread.thread_id,
+                "name": thread.name,
+                "status": thread.status,
+                "stage": thread.stage,
+                "open_questions": list(thread.open_questions[:5]),
+                "next_expected_beats": list(thread.next_expected_beats[:5]),
+            }
+        )
+    return rows
+
+
+def _active_character_memory(state: NovelAgentState) -> list[dict]:
+    dynamic_by_id = {item.character_id: item for item in state.domain.character_dynamic_states}
+    rows = []
+    for character in state.domain.characters[:16]:
+        dynamic = dynamic_by_id.get(character.character_id)
+        rows.append(
+            {
+                "character_id": character.character_id,
+                "name": character.name,
+                "stable_traits": list(character.stable_traits[:6]),
+                "current_goals": list(character.current_goals[:5]),
+                "knowledge_boundary": list(character.knowledge_boundary[:6]),
+                "voice_profile": list(character.voice_profile[:5]),
+                "forbidden_actions": list(character.forbidden_actions[:5]),
+                "active_goal": dynamic.active_goal if dynamic else "",
+                "known_facts": list(dynamic.known_facts[:5]) if dynamic else [],
+            }
+        )
+    return rows
+
+
+def _active_style_memory(state: NovelAgentState) -> dict:
+    return {
+        "sentence_length_distribution": dict(state.style.sentence_length_distribution),
+        "dialogue_ratio": state.style.dialogue_ratio,
+        "description_ratio": state.style.description_ratio,
+        "description_mix": dict(state.style.description_mix),
+        "rhetoric_markers": list(state.style.rhetoric_markers[:10]),
+        "lexical_fingerprint": list(state.style.lexical_fingerprint[:20]),
+        "forbidden_patterns": list(state.style.forbidden_patterns[:10]),
+    }
+
+
+def _unresolved_thread_memory(state: NovelAgentState) -> list[dict]:
+    rows = []
+    for thread in state.domain.plot_threads:
+        if thread.status.lower() in {"resolved", "closed"}:
+            continue
+        rows.append(
+            {
+                "thread_id": thread.thread_id,
+                "name": thread.name,
+                "open_questions": list(thread.open_questions[:5]),
+                "resolution_conditions": list(thread.resolution_conditions[:5]),
+            }
+        )
+    return rows[:12]
+
+
+def _foreshadowing_memory(state: NovelAgentState) -> list[dict]:
+    return [
+        {
+            "foreshadowing_id": item.foreshadowing_id,
+            "seed_text": item.seed_text,
+            "status": item.status,
+            "planted_at_chapter": item.planted_at_chapter,
+            "expected_payoff_chapter": item.expected_payoff_chapter,
+            "related_plot_thread_ids": list(item.related_plot_thread_ids),
+        }
+        for item in state.domain.foreshadowing[:20]
+    ]
+
+
+def _author_constraints_memory(state: NovelAgentState) -> list[dict]:
+    return [
+        {
+            "constraint_id": item.constraint_id,
+            "constraint_type": item.constraint_type,
+            "text": item.text,
+            "priority": item.priority,
+            "violation_policy": item.violation_policy,
+            "applies_to_chapters": list(item.applies_to_chapters),
+        }
+        for item in state.domain.author_constraints
+        if item.status == "confirmed"
+    ]
+
+
+def _safe_int(value: object) -> int | None:
+    try:
+        if value is None or value == "":
+            return None
+        return int(value)
+    except Exception:
+        return None

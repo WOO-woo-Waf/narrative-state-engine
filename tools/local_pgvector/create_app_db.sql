@@ -1,0 +1,2 @@
+CREATE ROLE novel_app WITH LOGIN PASSWORD 'novel_pg_waf_20260426';
+CREATE DATABASE novel_create OWNER novel_app ENCODING 'UTF8';

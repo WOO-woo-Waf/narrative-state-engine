@@ -9,6 +9,7 @@ from threading import Lock
 from typing import Any
 
 from narrative_state_engine.llm.base import BaseLLM, LLMCallResult, resolve_stream_flag
+from narrative_state_engine.llm.prompt_management import extract_prompt_metadata_from_messages
 from narrative_state_engine.logging import get_logger
 from narrative_state_engine.logging.interaction import new_interaction_id, record_llm_interaction
 from narrative_state_engine.logging.interaction_formatters import build_llm_log_line, summarize_messages, summarize_response
@@ -198,6 +199,8 @@ def unified_text_llm(messages: list[dict[str, Any]], **kwargs: Any) -> Any:
         interaction_context["purpose"] = purpose or ""
         interaction_context["model_name"] = model_name
     message_summary = summarize_messages(messages)
+    prompt_metadata = extract_prompt_metadata_from_messages(messages)
+    interaction_options.update(prompt_metadata)
 
     last_err: BaseException | None = None
     for endpoint in _endpoint_pool.iter_from(endpoints):

@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 
 from narrative_state_engine.analysis import NovelTextAnalyzer
+from narrative_state_engine.domain import AuthorPlanProposal
+from narrative_state_engine.domain.planning import AuthorPlanningEngine
 from narrative_state_engine.graph.workflow import build_langgraph, run_pipeline
 from narrative_state_engine.logging import init_logging
 from narrative_state_engine.logging.context import new_request_id, set_actor, set_story_id, set_thread_id
@@ -38,6 +40,20 @@ class ChapterContinuationResult:
     chapter_completed: bool
     rounds_executed: int
     final_chapter_text: str
+
+
+@dataclass
+class AuthorPlanProposalResult:
+    state: NovelAgentState
+    proposal: AuthorPlanProposal
+    persisted: bool
+
+
+@dataclass
+class AuthorPlanConfirmationResult:
+    state: NovelAgentState
+    proposal: AuthorPlanProposal
+    persisted: bool
 
 
 @dataclass
@@ -417,6 +433,7 @@ class NovelContinuationService:
         generator=None,
         extractor=None,
         proposal_applier: ProposalApplier | None = None,
+        author_planning_engine: AuthorPlanningEngine | None = None,
     ) -> None:
         self.repository = repository or build_story_state_repository(auto_init_schema=True)
         self.memory_store = memory_store
@@ -424,6 +441,7 @@ class NovelContinuationService:
         self.generator = generator
         self.extractor = extractor
         self.proposal_applier = proposal_applier or ProposalApplier()
+        self.author_planning_engine = author_planning_engine or AuthorPlanningEngine()
 
     def continue_from_state(
         self,
@@ -621,6 +639,79 @@ class NovelContinuationService:
             persist=persist,
             use_langgraph=use_langgraph,
             llm_model_name=llm_model_name,
+        )
+
+    def propose_author_plan_from_state(
+        self,
+        state: NovelAgentState,
+        author_input: str,
+        *,
+        persist: bool = False,
+    ) -> AuthorPlanProposalResult:
+        working_state = state.model_copy(deep=True)
+        proposal = self.author_planning_engine.propose(working_state, author_input)
+        persisted = False
+        if persist:
+            self.repository.save(working_state)
+            persisted = True
+        return AuthorPlanProposalResult(
+            state=working_state,
+            proposal=proposal,
+            persisted=persisted,
+        )
+
+    def propose_author_plan(
+        self,
+        story_id: str,
+        author_input: str,
+        *,
+        persist: bool = True,
+    ) -> AuthorPlanProposalResult:
+        existing = self.repository.get(story_id)
+        if existing is None:
+            raise ValueError(f"Story state not found: {story_id}")
+        return self.propose_author_plan_from_state(
+            existing,
+            author_input,
+            persist=persist,
+        )
+
+    def confirm_author_plan_from_state(
+        self,
+        state: NovelAgentState,
+        *,
+        proposal_id: str | None = None,
+        persist: bool = True,
+    ) -> AuthorPlanConfirmationResult:
+        working_state = state.model_copy(deep=True)
+        proposal = self.author_planning_engine.confirm(
+            working_state,
+            proposal_id=proposal_id,
+        )
+        persisted = False
+        if persist:
+            self.repository.save(working_state)
+            persisted = True
+        return AuthorPlanConfirmationResult(
+            state=working_state,
+            proposal=proposal,
+            persisted=persisted,
+        )
+
+    def confirm_author_plan(
+        self,
+        story_id: str,
+        *,
+        proposal_id: str | None = None,
+        persist: bool = True,
+    ) -> AuthorPlanConfirmationResult:
+        existing = self.repository.get(story_id)
+        if existing is None:
+            raise ValueError(f"Story state not found: {story_id}")
+        return self.confirm_author_plan_from_state(
+            existing,
+            proposal_id=proposal_id,
+            persist=persist,
         )
 
     def get_story_state_version(self, story_id: str, version_no: int) -> NovelAgentState | None:

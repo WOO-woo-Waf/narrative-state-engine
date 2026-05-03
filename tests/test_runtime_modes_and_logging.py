@@ -9,6 +9,7 @@ from narrative_state_engine.analysis import NovelTextAnalyzer
 from narrative_state_engine.graph import nodes as nodes_module
 from narrative_state_engine.llm.base import LLMCallResult
 from narrative_state_engine.llm.client import NovelLLMConfig, unified_text_llm
+from narrative_state_engine.llm.prompts import build_draft_messages
 from narrative_state_engine.models import NovelAgentState
 
 
@@ -142,6 +143,39 @@ def test_unified_text_llm_records_lifecycle_events(monkeypatch):
         "llm_request_started",
         "llm_request_succeeded",
     ]
+
+
+def test_unified_text_llm_records_prompt_metadata(monkeypatch):
+    import narrative_state_engine.llm.client as client_module
+
+    class FakeClient:
+        def set_model(self, model: str) -> None:
+            self.model = model
+
+        def chat(self, messages, return_metadata=True, **kwargs):
+            return LLMCallResult(value='{"ok": true}', usage={"total_tokens": 10}, stream=False)
+
+    events: list[dict] = []
+    monkeypatch.setattr(client_module, "record_llm_interaction", lambda **kwargs: events.append(kwargs))
+    monkeypatch.setattr(
+        client_module.LLMClientSingleton,
+        "get_instance",
+        staticmethod(lambda api_base, api_key: FakeClient()),
+    )
+
+    messages = build_draft_messages(NovelAgentState.demo("继续下一章。"))
+    unified_text_llm(
+        messages,
+        config=NovelLLMConfig(api_base="http://example.com", api_key="key", model_name="demo-model"),
+        purpose="draft_generation",
+    )
+
+    options = events[0]["request_options"]
+    assert options["prompt_profile"] == "default"
+    assert options["global_prompt_id"] == "global_default"
+    assert options["task_prompt_id"] == "draft_generation"
+    assert options["reasoning_mode"] == "internal"
+    assert "chain" not in options
 
 
 def test_llm_parse_trace_keeps_interaction_id(monkeypatch):

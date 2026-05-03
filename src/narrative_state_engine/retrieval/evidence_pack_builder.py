@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from narrative_state_engine.domain import EvidencePack, NarrativeEvidence, NarrativeQuery
 from narrative_state_engine.models import NovelAgentState
 
 
@@ -68,6 +69,123 @@ class EvidencePackBuilder:
             "retrieved_snippet_ids": selected_ids,
             "retrieved_case_ids": case_ids,
         }
+
+    def build_query_text(self, state: NovelAgentState) -> str:
+        return self._build_query(state)
+
+    def build_structured(
+        self,
+        state: NovelAgentState,
+        *,
+        legacy_pack: dict[str, Any] | None = None,
+        query: NarrativeQuery | None = None,
+    ) -> EvidencePack:
+        payload = legacy_pack or self.build(state)
+        query_id = query.query_id if query else f"query-{state.thread.request_id or state.thread.thread_id}"
+        pack = EvidencePack(
+            pack_id=f"evidence-{state.thread.request_id or state.thread.thread_id}",
+            query_id=query_id,
+        )
+
+        for snippet_type, rows in payload.get("style_snippet_records", {}).items():
+            for row in rows:
+                pack.style_evidence.append(
+                    NarrativeEvidence(
+                        evidence_id=str(row.get("snippet_id", "")),
+                        evidence_type=str(snippet_type),
+                        source="style_snippets",
+                        text=str(row.get("text", "")),
+                        usage_hint=f"style_{snippet_type}_example",
+                        chapter_index=_to_optional_int(row.get("chapter_number")),
+                        score_structural=float(row.get("structural_score", 0.0) or 0.0),
+                        final_score=float(row.get("combined_score", 0.0) or 0.0),
+                        metadata={key: value for key, value in row.items() if key not in {"text"}},
+                    )
+                )
+
+        for row in payload.get("event_case_examples", []):
+            text = " ".join(
+                str(item)
+                for item in list(row.get("action_sequence", [])) + list(row.get("dialogue_turns", []))
+                if str(item).strip()
+            )
+            pack.scene_case_evidence.append(
+                NarrativeEvidence(
+                    evidence_id=str(row.get("case_id", "")),
+                    evidence_type=str(row.get("event_type", "event_case")),
+                    source="event_style_cases",
+                    text=text or str(row.get("event_type", "")),
+                    usage_hint="event_case_example",
+                    related_entities=[str(item) for item in row.get("participants", [])],
+                    chapter_index=_to_optional_int(row.get("chapter_number")),
+                    score_structural=float(row.get("structural_score", 0.0) or 0.0),
+                    final_score=float(row.get("combined_score", 0.0) or 0.0),
+                    metadata=dict(row),
+                )
+            )
+
+        for constraint in state.domain.author_constraints:
+            if constraint.status != "confirmed":
+                continue
+            pack.author_plan_evidence.append(
+                NarrativeEvidence(
+                    evidence_id=constraint.constraint_id,
+                    evidence_type=f"author_{constraint.constraint_type}",
+                    source="author_constraints",
+                    text=constraint.text,
+                    usage_hint="author_plan_constraint",
+                    related_entities=list(constraint.applies_to_characters),
+                    related_plot_threads=list(constraint.applies_to_threads),
+                    score_author_plan=1.0,
+                    final_score=1.0,
+                    metadata=constraint.model_dump(mode="json"),
+                )
+            )
+
+        for block in state.domain.compressed_memory[:12]:
+            pack.plot_evidence.append(
+                NarrativeEvidence(
+                    evidence_id=block.block_id,
+                    evidence_type=f"memory_{block.block_type}",
+                    source="compressed_memory",
+                    text=block.summary,
+                    usage_hint="compressed_memory_context",
+                    related_entities=list(block.preserved_ids),
+                    score_structural=0.65,
+                    final_score=0.65,
+                    metadata=block.model_dump(mode="json"),
+                )
+            )
+
+        for edge in state.domain.graph_edges[:80]:
+            source_node = _find_graph_node_label(state, edge.source_node_id)
+            target_node = _find_graph_node_label(state, edge.target_node_id)
+            text = f"{source_node} --{edge.relation_type}--> {target_node}"
+            pack.plot_evidence.append(
+                NarrativeEvidence(
+                    evidence_id=edge.edge_id,
+                    evidence_type=f"graph_{edge.relation_type}",
+                    source="domain_graph",
+                    text=text,
+                    usage_hint="graph_neighbor_context",
+                    related_entities=[edge.source_node_id, edge.target_node_id],
+                    score_graph=round(float(edge.weight), 4),
+                    final_score=round(float(edge.weight) * 0.5, 4),
+                    metadata=edge.model_dump(mode="json"),
+                )
+            )
+
+        pack.retrieval_trace.append(
+            {
+                "stage": "structured_pack",
+                "status": "built",
+                "style_evidence_count": len(pack.style_evidence),
+                "scene_case_evidence_count": len(pack.scene_case_evidence),
+                "author_plan_evidence_count": len(pack.author_plan_evidence),
+                "plot_evidence_count": len(pack.plot_evidence),
+            }
+        )
+        return pack
 
     def _build_query(self, state: NovelAgentState) -> str:
         pieces = [
@@ -286,3 +404,19 @@ class EvidencePackBuilder:
             if len(out) >= max(limit, 0):
                 break
         return out
+
+
+def _to_optional_int(value: object) -> int | None:
+    try:
+        if value is None or value == "":
+            return None
+        return int(value)
+    except Exception:
+        return None
+
+
+def _find_graph_node_label(state: NovelAgentState, node_id: str) -> str:
+    for node in state.domain.graph_nodes:
+        if node.node_id == node_id:
+            return node.label or node.node_id
+    return node_id

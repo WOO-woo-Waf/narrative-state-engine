@@ -9,7 +9,7 @@ def test_build_draft_messages_uses_segment_protocol_and_trims_long_context():
         "规则" + ("乙" * 200),
         "规则" + ("丙" * 200),
     ]
-    state.chapter.open_questions = ["问题" + ("丁" * 160)]
+    state.chapter.open_questions = ["问题" + ("中" * 160)]
     state.analysis.evidence_pack = {
         "style_snippet_examples": {
             "action": ["动作样例" + ("戊" * 160)],
@@ -37,8 +37,14 @@ def test_build_draft_messages_uses_segment_protocol_and_trims_long_context():
     }
 
     messages = build_draft_messages(state)
+    system_message = messages[0]["content"]
     user_message = messages[1]["content"]
 
+    assert "narrative-state-engine" in system_message
+    assert "Draft Generator" in system_message
+    assert "prompt_profile: default" in system_message
+    assert "task_prompt_id: draft_generation" in system_message
+    assert "reasoning_mode: internal" in system_message
     assert "分段协议" in user_message
     assert "第 3 轮片段写作" in user_message
     assert "目标 900-1300 字" in user_message

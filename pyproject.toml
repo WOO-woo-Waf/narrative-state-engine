@@ -25,6 +25,10 @@ dependencies = [
 dev = [
   "pytest>=8.0",
 ]
+web = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+]
 
 [project.scripts]
 narrative-state-engine = "narrative_state_engine.cli:app"

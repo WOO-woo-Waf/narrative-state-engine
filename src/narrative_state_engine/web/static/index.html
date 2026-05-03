@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Narrative State Engine Workbench</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #20242a;
+      --muted: #66707d;
+      --line: #d9dee6;
+      --accent: #176b87;
+      --accent-2: #7d4f1f;
+      --ok: #237a4b;
+      --warn: #a76512;
+      --bad: #b73535;
+      --soft: #eef4f6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 22px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: 0; }
+    h2 { margin: 0 0 10px; font-size: 16px; }
+    h3 { margin: 14px 0 8px; font-size: 14px; }
+    button, input, select, textarea {
+      font: inherit;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+    }
+    input, select, textarea { width: 100%; padding: 8px 10px; }
+    textarea { min-height: 88px; resize: vertical; }
+    button {
+      padding: 8px 12px;
+      cursor: pointer;
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      white-space: nowrap;
+    }
+    button.secondary { background: #fff; color: var(--text); border-color: var(--line); }
+    main {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      min-height: calc(100vh - 58px);
+    }
+    nav {
+      padding: 16px;
+      border-right: 1px solid var(--line);
+      background: #fbfbfc;
+    }
+    nav button {
+      width: 100%;
+      text-align: left;
+      margin-bottom: 8px;
+      background: transparent;
+      color: var(--text);
+      border-color: transparent;
+    }
+    nav button.active {
+      background: var(--soft);
+      border-color: #c9dce3;
+      color: #0f4f67;
+      font-weight: 700;
+    }
+    .content { padding: 18px 22px 40px; }
+    .toolbar { display: grid; grid-template-columns: 1fr 160px 110px; gap: 10px; align-items: end; }
+    .grid { display: grid; gap: 12px; }
+    .grid.cols { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      min-width: 0;
+    }
+    .metric { font-size: 24px; font-weight: 800; color: var(--accent); }
+    .muted { color: var(--muted); }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #edf1f4;
+      color: #37424f;
+      margin: 2px 4px 2px 0;
+      font-size: 12px;
+    }
+    .pill.ok { background: #e7f3ec; color: var(--ok); }
+    .pill.warn { background: #fff3df; color: var(--warn); }
+    .pill.bad { background: #fae8e8; color: var(--bad); }
+    .list { display: grid; gap: 8px; }
+    .item {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 10px;
+      background: #fff;
+    }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #f1f3f5;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      max-height: 360px;
+      overflow: auto;
+    }
+    details { margin-top: 8px; }
+    summary { cursor: pointer; color: var(--accent); }
+    .form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .form-grid .wide { grid-column: 1 / -1; }
+    label { display: grid; gap: 4px; font-weight: 600; }
+    label span { color: var(--muted); font-size: 12px; font-weight: 500; }
+    .hidden { display: none; }
+    .chapter-text {
+      white-space: pre-wrap;
+      max-height: 520px;
+      overflow: auto;
+      border-left: 3px solid var(--accent-2);
+      padding-left: 12px;
+    }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+      nav { display: flex; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      nav button { width: auto; min-width: 96px; }
+      .toolbar, .grid.cols, .form-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>本地小说工作台</h1>
+      <div class="muted">分析、作者确认、检索证据和续写结果的可视化控制台</div>
+    </div>
+    <div class="toolbar">
+      <label>Story ID<input id="storyId" value="story_123_series"></label>
+      <label>Task ID<input id="taskId" value="task_123_series"></label>
+      <button id="refreshBtn">刷新</button>
+    </div>
+  </header>
+  <main>
+    <nav id="tabs">
+      <button data-tab="overview" class="active">总览</button>
+      <button data-tab="analysis">小说分析</button>
+      <button data-tab="author">作者确认</button>
+      <button data-tab="generated">续写内容</button>
+      <button data-tab="retrieval">检索证据</button>
+      <button data-tab="jobs">任务运行</button>
+    </nav>
+    <section class="content">
+      <div id="notice" class="panel muted">正在读取本地状态...</div>
+      <section id="overview" class="view"></section>
+      <section id="analysis" class="view hidden"></section>
+      <section id="author" class="view hidden"></section>
+      <section id="generated" class="view hidden"></section>
+      <section id="retrieval" class="view hidden"></section>
+      <section id="jobs" class="view hidden"></section>
+    </section>
+  </main>
+  <script>
+    const state = { tab: "overview", health: {}, jobsTimer: null };
+    const $ = (id) => document.getElementById(id);
+    const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    const storyId = () => $("storyId").value.trim() || "story_123_series";
+    const taskId = () => $("taskId").value.trim() || "task_123_series";
+    const api = async (path, options) => {
+      const response = await fetch(path, options);
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    };
+    const chips = (obj) => {
+      if (!obj || Object.keys(obj).length === 0) return '<span class="muted">暂无数据</span>';
+      return Object.entries(obj).map(([k, v]) => `<span class="pill">${esc(k)}: ${esc(v)}</span>`).join("");
+    };
+    const list = (items) => {
+      if (!items || items.length === 0) return '<div class="muted">暂无数据</div>';
+      return `<ul>${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`;
+    };
+    const raw = (value) => `<details><summary>原始 JSON</summary><pre>${esc(JSON.stringify(value ?? {}, null, 2))}</pre></details>`;
+
+    async function loadAll() {
+      $("notice").textContent = "正在刷新...";
+      try {
+        state.health = await api("/api/health");
+        await renderCurrent();
+        $("notice").innerHTML = state.health.database?.ok
+          ? `数据库可用。输出目录：${esc(state.health.output_dir.path)}`
+          : `数据库不可用或未配置：${esc(state.health.database?.message || "")}`;
+      } catch (error) {
+        $("notice").textContent = `刷新失败：${error.message}`;
+      }
+    }
+
+    async function renderCurrent() {
+      const tab = state.tab;
+      if (tab === "overview") return renderOverview(await api(`/api/stories/${storyId()}/overview`));
+      if (tab === "analysis") return renderAnalysis(await api(`/api/stories/${storyId()}/analysis`));
+      if (tab === "author") return renderAuthor(await api(`/api/stories/${storyId()}/author-plan`));
+      if (tab === "generated") return renderGenerated(await api(`/api/stories/${storyId()}/generated`));
+      if (tab === "retrieval") return renderRetrieval(await api(`/api/stories/${storyId()}/retrieval`));
+      if (tab === "jobs") return renderJobs();
+    }
+
+    function renderOverview(data) {
+      const s = data.status || {};
+      $("overview").innerHTML = `
+        <div class="grid cols">
+          <div class="panel"><h2>资料</h2><div class="metric">${esc(s.source_chunks || 0)}</div><div class="muted">原文切块数量</div>${chips(s.source_documents_by_type)}</div>
+          <div class="panel"><h2>证据</h2><div class="metric">${Object.values(s.evidence_by_type || {}).reduce((a,b)=>a+Number(b),0)}</div><div class="muted">结构化证据数量</div>${chips(s.evidence_by_type)}</div>
+          <div class="panel"><h2>状态</h2><div class="metric">v${esc(s.latest_state?.version_no || 0)}</div><div class="muted">最新状态版本</div><span class="pill ok">commit_status: ${esc(s.latest_state?.commit_status || "unknown")}</span></div>
+        </div>
+        <div class="grid cols" style="margin-top:12px">
+          <div class="panel"><h2>Embedding</h2>${chips(s.embedding_status)}<p class="muted">${esc(data.field_help?.embedding_status)}</p></div>
+          <div class="panel"><h2>续写回流</h2><div class="metric">${esc(s.generated_documents || 0)}</div><div class="muted">generated_continuation 文档</div></div>
+          <div class="panel"><h2>检索记录</h2><div class="metric">${esc(s.retrieval_runs || 0)}</div><div class="muted">retrieval_runs 总数</div></div>
+        </div>
+        ${raw(data)}
+      `;
+    }
+
+    function renderAnalysis(data) {
+      const bible = data.story_bible || {};
+      $("analysis").innerHTML = `
+        <div class="panel"><h2>全局梗概</h2><p>${esc(data.story_synopsis || "暂无全局梗概")}</p></div>
+        <div class="grid cols" style="margin-top:12px">
+          <div class="panel"><h2>角色卡</h2>${(bible.character_cards || []).slice(0, 12).map(c => `<div class="item"><b>${esc(c.name || c.character_id)}</b>${list([...(c.appearance_profile || []), ...(c.voice_profile || []), ...(c.state_transitions || [])].slice(0, 8))}</div>`).join("") || '<div class="muted">暂无角色卡</div>'}</div>
+          <div class="panel"><h2>剧情线</h2>${(bible.plot_threads || []).slice(0, 12).map(t => `<div class="item"><b>${esc(t.name || t.thread_id)}</b><p>${esc(t.stakes || t.stage || "")}</p>${list(t.open_questions || [])}</div>`).join("") || '<div class="muted">暂无剧情线</div>'}</div>
+          <div class="panel"><h2>世界规则</h2>${(bible.world_rules || []).slice(0, 16).map(r => `<div class="item"><span class="pill">${esc(r.rule_type || "rule")}</span> ${esc(r.rule_text || "")}</div>`).join("") || '<div class="muted">暂无世界规则</div>'}</div>
+        </div>
+        <div class="panel" style="margin-top:12px"><h2>章节分析</h2><div class="list">${(data.chapter_states || []).slice(0, 30).map(ch => `<div class="item"><b>第 ${esc(ch.chapter_index)} 章 ${esc(ch.chapter_title || "")}</b><p>${esc(ch.chapter_synopsis || ch.chapter_summary || "")}</p><div>${(ch.characters_involved || []).map(x => `<span class="pill">${esc(x)}</span>`).join("")}</div></div>`).join("") || '<div class="muted">暂无章节分析</div>'}</div></div>
+        <div class="panel" style="margin-top:12px"><h2>风格片段</h2><div class="list">${(data.style_snippets || []).slice(0, 20).map(s => `<div class="item"><span class="pill">${esc(s.snippet_type)}</span><p>${esc(s.text)}</p></div>`).join("") || '<div class="muted">暂无风格片段</div>'}</div></div>
+        ${raw(data.raw)}
+      `;
+    }
+
+    function renderAuthor(data) {
+      const plan = data.author_plan || {};
+      $("author").innerHTML = `
+        <div class="grid cols">
+          <div class="panel"><h2>作者目标</h2><p>${esc(plan.author_goal || "暂无作者目标")}</p><h3>主剧情骨架</h3>${list(plan.major_plot_spine || [])}</div>
+          <div class="panel"><h2>必须写</h2><p class="muted">${esc(data.field_help?.required_beats)}</p>${list(plan.required_beats || [])}</div>
+          <div class="panel"><h2>禁止写</h2><p class="muted">${esc(data.field_help?.forbidden_beats)}</p>${list(plan.forbidden_beats || [])}</div>
+        </div>
+        <div class="panel" style="margin-top:12px"><h2>章节蓝图</h2><div class="list">${(data.chapter_blueprints || []).map(b => `<div class="item"><b>第 ${esc(b.chapter_index)} 章</b><p>${esc(b.chapter_goal || "")}</p><span class="pill">ending_hook: ${esc(b.ending_hook || "")}</span>${list(b.required_beats || [])}</div>`).join("") || '<div class="muted">暂无章节蓝图</div>'}</div></div>
+        <div class="panel" style="margin-top:12px"><h2>作者约束</h2><div class="list">${(data.author_constraints || []).map(c => `<div class="item"><span class="pill ${c.status === "confirmed" ? "ok" : "warn"}">${esc(c.status)}</span> ${esc(c.text || "")}</div>`).join("") || '<div class="muted">暂无作者约束</div>'}</div></div>
+        <div class="panel" style="margin-top:12px"><h2>作者对话检索证据</h2><p class="muted">${esc(data.author_dialogue_retrieval?.query_text || "暂无检索上下文")}</p><div class="list">${(data.author_dialogue_retrieval?.evidence || []).slice(0, 12).map(e => `<div class="item"><span class="pill">${esc(e.evidence_type)}</span><span class="pill">${esc(e.source_type)}</span><p>${esc(e.text)}</p></div>`).join("") || '<div class="muted">暂无证据</div>'}</div></div>
+        ${raw(data.raw)}
+      `;
+    }
+
+    function renderGenerated(data) {
+      $("generated").innerHTML = `
+        <div class="grid cols">
+          <div class="panel"><h2>提交状态</h2><span class="pill ok">${esc(data.latest_commit?.status || "unknown")}</span><p class="muted">${esc(data.field_help?.commit_status)}</p></div>
+          <div class="panel"><h2>校验</h2><span class="pill">${esc(data.latest_validation?.status || "unknown")}</span><p>${esc(data.latest_validation?.requires_human_review ? "需要人工复核" : "未标记人工复核")}</p></div>
+          <div class="panel"><h2>数据库生成记录</h2><div class="metric">${esc((data.database_documents || []).length)}</div></div>
+        </div>
+        <div class="panel" style="margin-top:12px"><h2>输出章节文件</h2><div class="list">${(data.output_files || []).map(f => `<div class="item"><b>${esc(f.name)}</b><span class="pill">${esc(f.chars)} 字符</span><div class="chapter-text">${esc(f.content)}</div></div>`).join("") || '<div class="muted">novels_output 下暂无 txt 输出</div>'}</div></div>
+        <div class="panel" style="margin-top:12px"><h2>数据库 generated_continuation</h2><div class="list">${(data.database_documents || []).map(d => `<div class="item"><b>${esc(d.title)}</b><span class="pill">${esc(d.total_chars)} 字符</span><p class="muted">${esc(d.created_at)} ${esc(d.file_path)}</p></div>`).join("") || '<div class="muted">暂无数据库生成记录</div>'}</div></div>
+        ${raw(data)}
+      `;
+    }
+
+    function renderRetrieval(data) {
+      $("retrieval").innerHTML = `
+        <div class="panel"><h2>最近检索记录</h2><p class="muted">${esc(data.field_help?.retrieval_runs)}</p><div class="list">${(data.runs || []).map(r => `<div class="item"><b>${esc(r.query_text)}</b><p><span class="pill">${esc(r.latency_ms)} ms</span><span class="pill">${esc(r.selected_count)} selected</span><span class="pill">${esc(r.created_at)}</span></p><div>${chips(r.candidate_counts)}</div>${raw(r)}</div>`).join("") || '<div class="muted">暂无检索记录</div>'}</div></div>
+      `;
+    }
+
+    async function renderJobs() {
+      const jobs = await api("/api/jobs");
+      $("jobs").innerHTML = `
+        <div class="panel"><h2>运行任务</h2>${jobForm()}</div>
+        <div class="panel" style="margin-top:12px"><h2>任务日志</h2><div class="list">${(jobs.jobs || []).map(j => `<div class="item"><b>${esc(j.task)}</b><span class="pill ${j.status === "succeeded" ? "ok" : j.status === "failed" ? "bad" : "warn"}">${esc(j.status)}</span><p class="muted">${esc(j.created_at)} exit=${esc(j.exit_code ?? "")}</p><pre>${esc((j.stdout || "") + (j.stderr ? "\n[stderr]\n" + j.stderr : "") + (j.error ? "\n[error]\n" + j.error : ""))}</pre>${raw(j.command)}</div>`).join("") || '<div class="muted">暂无任务</div>'}</div></div>
+      `;
+      $("runJob").onclick = submitJob;
+      $("taskSelect").onchange = updateTaskHints;
+      updateTaskHints();
+    }
+
+    function jobForm() {
+      return `
+        <div class="form-grid">
+          <label>任务<span>固定白名单命令</span><select id="taskSelect">
+            <option value="search-debug">search-debug</option>
+            <option value="generate-chapter">generate-chapter</option>
+            <option value="author-session">author-session</option>
+            <option value="analyze-task">analyze-task</option>
+            <option value="ingest-txt">ingest-txt</option>
+            <option value="backfill-embeddings">backfill-embeddings</option>
+          </select></label>
+          <label>输入文件<span>仅 novels_input 内</span><input id="jobFile" value="novels_input/1.txt"></label>
+          <label>输出文件<span>仅 novels_output 内</span><input id="jobOutput" value="novels_output/chapter_preview.txt"></label>
+          <label class="wide">Prompt / Seed / Query<textarea id="jobText">角色联动 世界观 主线推进 人物关系 场景行动</textarea></label>
+          <label>标题<input id="jobTitle" value="target_continuation_1"></label>
+          <label>source_type<input id="jobSourceType" value="target_continuation"></label>
+          <label>limit / rounds<input id="jobLimit" value="8"></label>
+          <label>min_chars<input id="jobMinChars" value="800"></label>
+          <label>persist<select id="jobPersist"><option value="false">false</option><option value="true">true</option></select></label>
+          <label>LLM<select id="jobLlm"><option value="true">true</option><option value="false">false</option></select></label>
+          <label>RAG<select id="jobRag"><option value="true">true</option><option value="false">false</option></select></label>
+          <label class="wide">Objective<textarea id="jobObjective">完成下一章正文，保持人物状态、场景行动、交互逻辑和主线推进一致。</textarea></label>
+          <div><button id="runJob">运行任务</button></div>
+          <div class="wide muted" id="taskHint"></div>
+        </div>
+      `;
+    }
+
+    function updateTaskHints() {
+      const task = $("taskSelect").value;
+      $("taskHint").textContent = {
+        "search-debug": "使用 Prompt/Seed/Query 作为检索 query，默认不启动远程服务。",
+        "generate-chapter": "使用 Prompt/Seed/Query 作为续写 prompt，默认 --no-persist，输出到 novels_output。",
+        "author-session": "使用 Prompt/Seed/Query 作为作者规划 seed。",
+        "analyze-task": "分析输入文件，可选择 LLM 和 persist。",
+        "ingest-txt": "导入输入文件到数据库。",
+        "backfill-embeddings": "补齐 story 下证据向量，不启动或停止远程服务。"
+      }[task] || "";
+    }
+
+    async function submitJob() {
+      const task = $("taskSelect").value;
+      const text = $("jobText").value;
+      const limit = Number($("jobLimit").value || 8);
+      const params = {
+        story_id: storyId(),
+        task_id: taskId(),
+        file: $("jobFile").value,
+        output: $("jobOutput").value,
+        title: $("jobTitle").value,
+        source_type: $("jobSourceType").value,
+        query: text,
+        seed: text,
+        prompt: text,
+        objective: $("jobObjective").value,
+        limit,
+        rounds: Math.max(1, limit),
+        min_chars: Number($("jobMinChars").value || 800),
+        min_paragraphs: 3,
+        concurrency: 3,
+        retrieval_limit: 12,
+        llm: $("jobLlm").value === "true",
+        rag: $("jobRag").value === "true",
+        persist: $("jobPersist").value === "true",
+        rerank: true,
+        log_run: task === "search-debug"
+      };
+      try {
+        await api("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task, params }) });
+        await renderJobs();
+      } catch (error) {
+        alert(`任务提交失败：${error.message}`);
+      }
+    }
+
+    $("tabs").addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-tab]");
+      if (!button) return;
+      state.tab = button.dataset.tab;
+      document.querySelectorAll("nav button").forEach(btn => btn.classList.toggle("active", btn === button));
+      document.querySelectorAll(".view").forEach(view => view.classList.toggle("hidden", view.id !== state.tab));
+      await renderCurrent();
+    });
+    $("refreshBtn").onclick = loadAll;
+    loadAll();
+    setInterval(() => { if (state.tab === "jobs") renderJobs(); }, 4000);
+  </script>
+</body>
+</html>

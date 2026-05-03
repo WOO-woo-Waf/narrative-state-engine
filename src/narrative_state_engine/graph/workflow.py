@@ -3,15 +3,21 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 from narrative_state_engine.graph.nodes import (
+    author_plan_retrieval,
+    character_consistency_evaluator,
     commit_or_rollback,
     consistency_validator,
+    domain_context_builder,
+    domain_state_composer,
     draft_generator,
     evidence_retrieval,
     human_review_gate,
     information_extractor,
     intent_parser,
     make_runtime,
+    memory_compressor,
     memory_retrieval,
+    plot_alignment_evaluator,
     plot_planner,
     repair_loop,
     state_composer,
@@ -35,12 +41,17 @@ class GraphEnvelope(TypedDict):
 SEQUENTIAL_NODES = [
     intent_parser,
     memory_retrieval,
+    domain_state_composer,
+    author_plan_retrieval,
+    domain_context_builder,
     state_composer,
     plot_planner,
     evidence_retrieval,
     draft_generator,
     information_extractor,
     consistency_validator,
+    character_consistency_evaluator,
+    plot_alignment_evaluator,
     style_evaluator,
     repair_loop,
 ]
@@ -71,7 +82,8 @@ def run_pipeline(
         state = node(state, runtime)
     if state.validation.requires_human_review:
         state = human_review_gate(state, runtime)
-    return commit_or_rollback(state, runtime)
+    state = commit_or_rollback(state, runtime)
+    return memory_compressor(state, runtime)
 
 
 def build_langgraph(
@@ -108,26 +120,37 @@ def build_langgraph(
 
     graph.add_node("intent_parser", wrap(intent_parser))
     graph.add_node("memory_retrieval", wrap(memory_retrieval))
+    graph.add_node("domain_state_composer", wrap(domain_state_composer))
+    graph.add_node("author_plan_retrieval", wrap(author_plan_retrieval))
+    graph.add_node("domain_context_builder", wrap(domain_context_builder))
     graph.add_node("state_composer", wrap(state_composer))
     graph.add_node("plot_planner", wrap(plot_planner))
     graph.add_node("draft_generator", wrap(draft_generator))
     graph.add_node("information_extractor", wrap(information_extractor))
     graph.add_node("consistency_validator", wrap(consistency_validator))
+    graph.add_node("character_consistency_evaluator", wrap(character_consistency_evaluator))
+    graph.add_node("plot_alignment_evaluator", wrap(plot_alignment_evaluator))
     graph.add_node("style_evaluator", wrap(style_evaluator))
     graph.add_node("repair_loop", wrap(repair_loop))
     graph.add_node("human_review_gate", wrap(human_review_gate))
     graph.add_node("commit_or_rollback", wrap(commit_or_rollback))
+    graph.add_node("memory_compressor", wrap(memory_compressor))
     graph.add_node("evidence_retrieval", wrap(evidence_retrieval))
 
     graph.add_edge(START, "intent_parser")
     graph.add_edge("intent_parser", "memory_retrieval")
-    graph.add_edge("memory_retrieval", "state_composer")
+    graph.add_edge("memory_retrieval", "domain_state_composer")
+    graph.add_edge("domain_state_composer", "author_plan_retrieval")
+    graph.add_edge("author_plan_retrieval", "domain_context_builder")
+    graph.add_edge("domain_context_builder", "state_composer")
     graph.add_edge("state_composer", "plot_planner")
     graph.add_edge("plot_planner", "evidence_retrieval")
     graph.add_edge("evidence_retrieval", "draft_generator")
     graph.add_edge("draft_generator", "information_extractor")
     graph.add_edge("information_extractor", "consistency_validator")
-    graph.add_edge("consistency_validator", "style_evaluator")
+    graph.add_edge("consistency_validator", "character_consistency_evaluator")
+    graph.add_edge("character_consistency_evaluator", "plot_alignment_evaluator")
+    graph.add_edge("plot_alignment_evaluator", "style_evaluator")
     graph.add_edge("style_evaluator", "repair_loop")
 
     def route_after_repair(envelope: GraphEnvelope) -> str:
@@ -143,6 +166,7 @@ def build_langgraph(
         },
     )
     graph.add_edge("human_review_gate", "commit_or_rollback")
-    graph.add_edge("commit_or_rollback", END)
+    graph.add_edge("commit_or_rollback", "memory_compressor")
+    graph.add_edge("memory_compressor", END)
 
     return graph.compile(checkpointer=MemorySaver())

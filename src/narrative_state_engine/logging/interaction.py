@@ -50,6 +50,15 @@ class LLMInteractionRecord:
     parse_error: str = ""
     fallback_used: str = ""
     retryable_error: bool = False
+    prompt_profile: str = ""
+    prompt_profile_version: str = ""
+    global_prompt_id: str = ""
+    global_prompt_version: str = ""
+    global_prompt_hash: str = ""
+    task_prompt_id: str = ""
+    task_prompt_version: str = ""
+    task_prompt_hash: str = ""
+    reasoning_mode: str = ""
     request_messages: list[dict[str, Any]] | None = None
     request_options: dict[str, Any] | None = None
     response_text: str = ""
@@ -150,6 +159,15 @@ def record_llm_interaction(
         parse_error=_truncate_error(parse_error, limit=1000),
         fallback_used=fallback_used,
         retryable_error=bool(retryable_error),
+        prompt_profile=str(safe_options.get("prompt_profile", "") or ""),
+        prompt_profile_version=str(safe_options.get("prompt_profile_version", "") or ""),
+        global_prompt_id=str(safe_options.get("global_prompt_id", "") or ""),
+        global_prompt_version=str(safe_options.get("global_prompt_version", "") or ""),
+        global_prompt_hash=str(safe_options.get("global_prompt_hash", "") or ""),
+        task_prompt_id=str(safe_options.get("task_prompt_id", "") or ""),
+        task_prompt_version=str(safe_options.get("task_prompt_version", "") or ""),
+        task_prompt_hash=str(safe_options.get("task_prompt_hash", "") or ""),
+        reasoning_mode=str(safe_options.get("reasoning_mode", "") or ""),
         request_messages=safe_messages,
         request_options=safe_options,
         response_text=response_value,

@@ -1,5 +1,6 @@
 from narrative_state_engine.analysis.analyzer import NovelTextAnalyzer
 from narrative_state_engine.analysis.chunker import TextChunker
+from narrative_state_engine.analysis.llm_analyzer import LLMNovelAnalyzer
 from narrative_state_engine.analysis.models import (
     AnalysisRunResult,
     ChapterAnalysisState,
@@ -23,6 +24,7 @@ __all__ = [
     "ChunkAnalysisState",
     "EventStyleCaseAsset",
     "GlobalStoryAnalysisState",
+    "LLMNovelAnalyzer",
     "NovelTextAnalyzer",
     "PlotThreadAsset",
     "SnippetType",

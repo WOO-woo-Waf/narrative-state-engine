@@ -14,6 +14,141 @@ from narrative_state_engine.analysis.models import AnalysisRunResult
 from narrative_state_engine.models import NovelAgentState, StateChangeProposal, UpdateType
 
 
+def _analysis_evidence_rows(analysis: AnalysisRunResult) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    analysis_source_type = str(dict(analysis.summary).get("source_type") or "analysis").strip() or "analysis"
+
+    def add(
+        *,
+        suffix: str,
+        evidence_type: str,
+        text_value: str,
+        chapter_index: int | None = None,
+        related_entities: list[str] | None = None,
+        related_plot_threads: list[str] | None = None,
+        tags: list[str] | None = None,
+        importance: float = 0.7,
+        recency: float = 0.5,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        clean = str(text_value or "").strip()
+        if not clean:
+            return
+        rows.append(
+            {
+                "evidence_id": f"analysis:{analysis.story_id}:{analysis.analysis_version}:{suffix}",
+                "evidence_type": evidence_type,
+                "chapter_index": chapter_index,
+                "text": clean[:4000],
+                "related_entities": list(related_entities or []),
+                "related_plot_threads": list(related_plot_threads or []),
+                "tags": list(tags or ["analysis", evidence_type]),
+                "importance": float(importance),
+                "recency": float(recency),
+                "metadata": {"source_type": analysis_source_type, **dict(metadata or {})},
+            }
+        )
+
+    add(
+        suffix="story-synopsis",
+        evidence_type="global_story_state",
+        text_value=analysis.story_synopsis,
+        importance=0.95,
+        recency=1.0,
+        metadata={"scope": "global"},
+    )
+    for chapter in analysis.chapter_states:
+        add(
+            suffix=f"chapter-{chapter.chapter_index:05d}-summary",
+            evidence_type="chapter_summary",
+            text_value=chapter.chapter_synopsis or chapter.chapter_summary,
+            chapter_index=chapter.chapter_index,
+            related_entities=list(chapter.characters_involved),
+            related_plot_threads=list(chapter.plot_progress),
+            importance=0.85,
+            recency=_analysis_recency(chapter.chapter_index, len(analysis.chapter_states)),
+            metadata={"chapter_title": chapter.chapter_title},
+        )
+        for idx, event in enumerate(chapter.chapter_events[:8], start=1):
+            add(
+                suffix=f"chapter-{chapter.chapter_index:05d}-event-{idx:03d}",
+                evidence_type="event",
+                text_value=event,
+                chapter_index=chapter.chapter_index,
+                related_entities=list(chapter.characters_involved),
+                related_plot_threads=list(chapter.plot_progress),
+                importance=0.78,
+                recency=_analysis_recency(chapter.chapter_index, len(analysis.chapter_states)),
+            )
+    for idx, card in enumerate(analysis.story_bible.character_cards, start=1):
+        add(
+            suffix=f"character-{idx:03d}",
+            evidence_type="character_card",
+            text_value="；".join(
+                item
+                for item in [
+                    card.name,
+                    "身份/外观:" + "、".join(card.appearance_profile[:4]) if card.appearance_profile else "",
+                    "口吻:" + "、".join(card.voice_profile[:4]) if card.voice_profile else "",
+                    "动作:" + "、".join(card.gesture_patterns[:4]) if card.gesture_patterns else "",
+                    "变化:" + "、".join(card.state_transitions[:4]) if card.state_transitions else "",
+                ]
+                if item
+            ),
+            related_entities=[card.name],
+            importance=0.9,
+            recency=1.0,
+            metadata={"character_id": card.character_id},
+        )
+    for idx, thread in enumerate(analysis.story_bible.plot_threads, start=1):
+        add(
+            suffix=f"plot-thread-{idx:03d}",
+            evidence_type="plot_thread",
+            text_value="；".join(
+                item
+                for item in [
+                    thread.name,
+                    thread.stage,
+                    thread.stakes,
+                    "问题:" + "、".join(thread.open_questions[:4]) if thread.open_questions else "",
+                    "锚点:" + "、".join(thread.anchor_events[:4]) if thread.anchor_events else "",
+                ]
+                if item
+            ),
+            related_plot_threads=[thread.thread_id, thread.name],
+            importance=0.88,
+            recency=1.0,
+            metadata={"thread_id": thread.thread_id},
+        )
+    for idx, rule in enumerate(analysis.story_bible.world_rules, start=1):
+        add(
+            suffix=f"world-rule-{idx:03d}",
+            evidence_type="world_rule",
+            text_value=rule.rule_text,
+            importance=0.86 if rule.rule_type == "hard" else 0.76,
+            recency=1.0,
+            metadata={"rule_id": rule.rule_id, "rule_type": rule.rule_type},
+        )
+    for idx, snippet in enumerate(analysis.snippet_bank[:200], start=1):
+        add(
+            suffix=f"style-snippet-{idx:03d}",
+            evidence_type="style_snippet",
+            text_value=snippet.text,
+            chapter_index=snippet.chapter_number,
+            tags=["analysis", "style", str(snippet.snippet_type.value)],
+            importance=0.58,
+            recency=_analysis_recency(int(snippet.chapter_number or 1), max(len(analysis.chapter_states), 1)),
+            metadata={"snippet_id": snippet.snippet_id, "snippet_type": snippet.snippet_type.value},
+        )
+    return rows
+
+
+def _analysis_recency(index: int, total: int) -> float:
+    if total <= 1:
+        return 1.0
+    return round(max(min(index / total, 1.0), 0.0), 4)
+
+
 class StoryStateRepository(Protocol):
     def get(self, story_id: str) -> NovelAgentState | None:
         ...
@@ -88,6 +223,7 @@ class InMemoryStoryStateRepository:
     analysis_runs: dict[str, dict[str, Any]] = field(default_factory=dict)
     chapter_analysis_states: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     global_story_analysis: dict[str, dict[str, Any]] = field(default_factory=dict)
+    analysis_evidence: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     version_history: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     def get(self, story_id: str) -> NovelAgentState | None:
@@ -125,6 +261,7 @@ class InMemoryStoryStateRepository:
             if analysis.global_story_state is not None
             else {}
         )
+        self.analysis_evidence[story_id] = _analysis_evidence_rows(analysis)
         previous_version = int(self.story_bibles.get(story_id, {}).get("version_no", 0))
         version_no = previous_version + 1
         self.story_bibles[story_id] = {
@@ -273,7 +410,13 @@ class PostgreSQLStoryStateRepository:
         if self._has_vector_extension():
             return raw_sql
         adapted = re.sub(r"CREATE EXTENSION IF NOT EXISTS vector;\s*", "", raw_sql, flags=re.IGNORECASE)
-        adapted = re.sub(r"VECTOR\s*\(\s*\d+\s*\)", "JSONB", adapted, flags=re.IGNORECASE)
+        adapted = re.sub(r"(?:HALFVEC|VECTOR)\s*\(\s*\d+\s*\)", "JSONB", adapted, flags=re.IGNORECASE)
+        adapted = re.sub(
+            r"CREATE INDEX IF NOT EXISTS [^;]+ USING hnsw \([^)]+\);\s*",
+            "",
+            adapted,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
         return adapted
 
     def _has_vector_extension(self) -> bool:
@@ -637,6 +780,8 @@ class PostgreSQLStoryStateRepository:
                     },
                 )
 
+            self._index_analysis_evidence(conn, analysis=analysis, analysis_id=int(analysis_id))
+
     def load_analysis_run(
         self,
         story_id: str,
@@ -664,6 +809,67 @@ class PostgreSQLStoryStateRepository:
         payload["result_summary"] = result_summary
         payload["analysis_version"] = str(payload.get("analysis_version", ""))
         return payload
+
+    def _index_analysis_evidence(self, conn, *, analysis: AnalysisRunResult, analysis_id: int) -> None:
+        conn.execute(
+            text(
+                """
+                DELETE FROM narrative_evidence_index
+                WHERE story_id = :story_id AND source_table = 'analysis_runs'
+                """
+            ),
+            {"story_id": analysis.story_id},
+        )
+        for row in _analysis_evidence_rows(analysis):
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO narrative_evidence_index (
+                        evidence_id, story_id, evidence_type, source_table, source_id,
+                        chapter_index, text, related_entities, related_plot_threads,
+                        tags, canonical, importance, recency, tsv, metadata
+                    )
+                    VALUES (
+                        :evidence_id, :story_id, :evidence_type, 'analysis_runs', :source_id,
+                        :chapter_index, :text, CAST(:related_entities AS JSONB),
+                        CAST(:related_plot_threads AS JSONB), CAST(:tags AS JSONB),
+                        TRUE, :importance, :recency, to_tsvector('simple', :text),
+                        CAST(:metadata AS JSONB)
+                    )
+                    ON CONFLICT (evidence_id) DO UPDATE
+                    SET text = EXCLUDED.text,
+                        chapter_index = EXCLUDED.chapter_index,
+                        related_entities = EXCLUDED.related_entities,
+                        related_plot_threads = EXCLUDED.related_plot_threads,
+                        tags = EXCLUDED.tags,
+                        importance = EXCLUDED.importance,
+                        recency = EXCLUDED.recency,
+                        tsv = EXCLUDED.tsv,
+                        metadata = EXCLUDED.metadata,
+                        embedding_status = CASE
+                            WHEN narrative_evidence_index.text = EXCLUDED.text THEN narrative_evidence_index.embedding_status
+                            ELSE 'pending'
+                        END,
+                        updated_at = NOW()
+                    """
+                ),
+                {
+                    **row,
+                    "story_id": analysis.story_id,
+                    "source_id": str(analysis_id),
+                    "related_entities": json.dumps(row.get("related_entities", []), ensure_ascii=False),
+                    "related_plot_threads": json.dumps(row.get("related_plot_threads", []), ensure_ascii=False),
+                    "tags": json.dumps(row.get("tags", []), ensure_ascii=False),
+                    "metadata": json.dumps(
+                        {
+                            **dict(row.get("metadata", {})),
+                            "analysis_version": analysis.analysis_version,
+                            "source": "analysis",
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            )
 
     def load_chapter_analysis_states(self, story_id: str) -> list[dict[str, Any]]:
         payload = self.load_analysis_run(story_id)

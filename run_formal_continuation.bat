@@ -12,6 +12,7 @@ REM ==================================================
 set "INPUT_FILE=first.txt"
 set "INSTRUCTION=我要的情节是女主角被重塑造了一个身体，过程和前面情节的抽取灵魂差不多，要有相似的情节元素和过程，要一个章节，1万字的具体内容，主角都差不多。"
 set "ROUNDS=10"
+set "LLM_ANALYSIS=0"
 
 REM ---------------------------
 REM Fixed defaults (usually unchanged)
@@ -47,6 +48,7 @@ set "CURRENT_NOVEL_DIR=%NOVEL_DIR%"
 set "CURRENT_INPUT=%INPUT_FILE%"
 
 for %%F in ("%CURRENT_INPUT%") do set "STEM=%%~nF"
+set "TASK_ID=task-%STEM%"
 set "OUT_TXT=%STEM%.%STAMP%.chapter.txt"
 set "OUT_INITIAL_STATE=%STEM%.%STAMP%.initial.state.json"
 set "OUT_STATE=%STEM%.%STAMP%.final.state.json"
@@ -59,12 +61,19 @@ echo [INFO] Source dir: %CURRENT_NOVEL_DIR%
 echo [INFO] Source file: %CURRENT_INPUT%
 echo [INFO] LLM max tokens: %LLM_MAX_TOKENS%
 echo [INFO] LLM temperature: %LLM_TEMPERATURE%
+echo [INFO] LLM analysis: %LLM_ANALYSIS%
+
+set "LLM_ANALYSIS_FLAG="
+if "%LLM_ANALYSIS%"=="1" set "LLM_ANALYSIS_FLAG=--llm-analysis"
 
 python run_novel_continuation.py ^
   --mode analyze-continue ^
   --novel-dir "%CURRENT_NOVEL_DIR%" ^
   --input-file "%CURRENT_INPUT%" ^
   --instruction "%INSTRUCTION%" ^
+  --task-id "%TASK_ID%" ^
+  --source-type "target_continuation" ^
+  %LLM_ANALYSIS_FLAG% ^
   --model "%MODEL%" ^
   --llm-max-tokens %LLM_MAX_TOKENS% ^
   --llm-temperature %LLM_TEMPERATURE% ^

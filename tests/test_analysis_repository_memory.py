@@ -28,3 +28,9 @@ def test_inmemory_repository_persists_analysis_assets():
     assert len(cases) > 0
     assert bible is not None
     assert bible["analysis_version"] == analysis.analysis_version
+    assert len(repo.analysis_evidence["story-memory-001"]) > 0
+    assert {
+        row["evidence_type"]
+        for row in repo.analysis_evidence["story-memory-001"]
+    }.intersection({"chapter_summary", "character_card", "plot_thread", "world_rule", "style_snippet"})
+    assert all(row["metadata"].get("source_type") for row in repo.analysis_evidence["story-memory-001"])

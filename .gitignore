@@ -3,6 +3,9 @@
 .env.local
 .env.*
 !.env.example
+.pgdata/
+.pgdata_vector/
+.pgpass_local
 __pycache__/
 .pytest_cache/
 *.pyc
@@ -17,3 +20,4 @@ logs/
 novels_output/
 novels_input/
 node_modules/
+reference/

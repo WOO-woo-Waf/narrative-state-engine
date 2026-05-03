@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from narrative_state_engine.analysis import AnalysisRunResult, NovelTextAnalyzer
+from narrative_state_engine.analysis import AnalysisRunResult, LLMNovelAnalyzer, NovelTextAnalyzer
 from narrative_state_engine.application import ChapterCompletionPolicy, NovelContinuationService
 from narrative_state_engine.bootstrap import apply_analysis_to_state
 from narrative_state_engine.logging import get_llm_interaction_log_path
@@ -286,6 +286,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--completion-weight-plot", type=float, default=0.40, help="Completion strategy weight for plot progress.")
     parser.add_argument("--completion-threshold", type=float, default=0.72, help="Weighted completion threshold.")
     parser.add_argument("--story-id", default="", help="Optional logical story id token.")
+    parser.add_argument("--task-id", default="", help="Optional task id for task-level analysis and generation.")
+    parser.add_argument("--source-type", default="target_continuation", help="Task source type for this input file.")
+    parser.add_argument("--llm-analysis", action="store_true", help="Use LLM-assisted multi-layer novel analysis.")
+    parser.add_argument("--llm-analysis-max-chunks", type=int, default=0, help="Optional cap for LLM-analyzed chunks.")
     parser.add_argument("--title", default="", help="Optional story title override.")
     parser.add_argument("--output-dir", default="", help="Directory for outputs. Defaults to --novel-dir.")
     parser.add_argument("--output-file", default="", help="Output continuation txt filename.")
@@ -415,7 +419,15 @@ def main() -> None:
             story_id=args.story_id or None,
             title=args.title or None,
         )
-        analyzer = NovelTextAnalyzer(max_chunk_chars=max(int(args.analysis_max_chunk_chars), 400))
+        if bool(args.llm_analysis):
+            analyzer = LLMNovelAnalyzer(
+                task_id=args.task_id or args.story_id or state.story.story_id,
+                source_type=args.source_type,
+                max_chunk_chars=max(int(args.analysis_max_chunk_chars), 400),
+                max_chunks=(int(args.llm_analysis_max_chunks) if int(args.llm_analysis_max_chunks or 0) > 0 else None),
+            )
+        else:
+            analyzer = NovelTextAnalyzer(max_chunk_chars=max(int(args.analysis_max_chunk_chars), 400))
         analysis = analyzer.analyze(
             source_text=source_text,
             story_id=state.story.story_id,
@@ -495,6 +507,9 @@ def main() -> None:
 
     print(f"mode: {mode}")
     print(f"source: {source_path or '(analysis baseline)'}")
+    print(f"task_id: {args.task_id or '(story-id default)'}")
+    print(f"source_type: {args.source_type}")
+    print(f"llm_analysis: {bool(args.llm_analysis)}")
     print(f"model: {model_used}")
     print(f"commit_status: {chapter_result.state.commit.status}")
     print(f"accepted_changes: {len(chapter_result.state.commit.accepted_changes)}")

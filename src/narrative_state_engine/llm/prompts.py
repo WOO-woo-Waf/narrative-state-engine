@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from narrative_state_engine.llm.prompt_management import compose_system_prompt
 from narrative_state_engine.models import NovelAgentState
 
 
@@ -66,14 +67,7 @@ def _format_examples(state: NovelAgentState) -> tuple[str, str]:
 
 
 def build_draft_messages(state: NovelAgentState) -> list[dict[str, str]]:
-    system = (
-        "你是小说续写系统中的 Draft Generator 节点。"
-        "你必须严格遵守世界规则、角色知识边界、章节目标和风格约束。"
-        "你当前只负责输出本轮章节片段，不要试图一次写完整章。"
-        "输出必须是 JSON 对象，不要输出任何额外说明。"
-        "JSON 规则：键名和字符串必须用双引号；不要使用 markdown 代码块；"
-        "不要输出注释；不要输出尾逗号；字符串中的换行必须使用\\n转义。"
-    )
+    system = compose_system_prompt(purpose="draft_generation").system_content
     schema = {
         "content": "string, 本轮章节片段正文",
         "rationale": "string, 本轮推进理由",
@@ -89,6 +83,16 @@ def build_draft_messages(state: NovelAgentState) -> list[dict[str, str]]:
     fragment_stats = state.metadata.get("chapter_fragment_stats", {}) or {}
     segment_plan = state.metadata.get("chapter_segment_plan", {}) or {}
     fragment_tail = _truncate_text(state.metadata.get("chapter_fragment_tail", ""), max_chars=320)
+    domain_context = state.metadata.get("domain_context_sections", {}) or {}
+    author_constraints_text = _truncate_text(domain_context.get("author_constraints", ""), max_chars=360)
+    compressed_memory_text = _truncate_text(domain_context.get("compressed_memory", ""), max_chars=520)
+    domain_character_text = _truncate_text(domain_context.get("character_cards", ""), max_chars=360)
+    domain_plot_text = _truncate_text(domain_context.get("plot_threads", ""), max_chars=360)
+    retrieved_plot_text = _truncate_text(domain_context.get("plot_evidence", ""), max_chars=900)
+    retrieved_character_text = _truncate_text(domain_context.get("character_evidence", ""), max_chars=700)
+    retrieved_world_text = _truncate_text(domain_context.get("world_evidence", ""), max_chars=700)
+    retrieved_style_text = _truncate_text(domain_context.get("style_evidence", ""), max_chars=650)
+    retrieved_scene_case_text = _truncate_text(domain_context.get("scene_case_evidence", ""), max_chars=520)
     round_no = int(state.metadata.get("chapter_loop_round", 1) or 1)
     fragment_count = int(fragment_stats.get("fragment_count", 0) or 0)
     written_chars = int(fragment_stats.get("written_chars", 0) or 0)
@@ -139,6 +143,15 @@ def build_draft_messages(state: NovelAgentState) -> list[dict[str, str]]:
         f"描写占比={json.dumps(state.style.description_mix, ensure_ascii=False)}\n"
         f"证据句配额样例: {style_examples_text}\n"
         f"事件样例: {case_examples_text}\n"
+        f"作者约束: {author_constraints_text or '无'}\n"
+        f"压缩记忆: {compressed_memory_text or '无'}\n"
+        f"领域角色卡: {domain_character_text or '无'}\n"
+        f"领域剧情线: {domain_plot_text or '无'}\n"
+        f"检索剧情证据: {retrieved_plot_text or '无'}\n"
+        f"检索人物证据: {retrieved_character_text or '无'}\n"
+        f"检索世界观证据: {retrieved_world_text or '无'}\n"
+        f"检索风格证据: {retrieved_style_text or '无'}\n"
+        f"检索场景案例: {retrieved_scene_case_text or '无'}\n"
         f"已写片段尾部: {fragment_tail or '无'}\n"
         f"分段协议: {segment_directive}\n"
         f"修正提示: {repair_prompt or '无'}\n"
@@ -151,6 +164,7 @@ def build_draft_messages(state: NovelAgentState) -> list[dict[str, str]]:
         "2. 片段必须是可直接拼接到章节中的正文，而不是提纲或说明。\n"
         "3. 若总目标很长，也只完成本轮配额，把悬念留给下一轮。\n"
         "4. continuity_notes 只记录本轮需要保持的连续性约束。\n"
+        "5. 若作者约束存在，必须优先满足作者约束，不得触发禁止剧情点。\n"
         f"请按如下 schema 输出 JSON:\n{json.dumps(schema, ensure_ascii=False)}"
     )
     return [
@@ -160,14 +174,7 @@ def build_draft_messages(state: NovelAgentState) -> list[dict[str, str]]:
 
 
 def build_extraction_messages(state: NovelAgentState) -> list[dict[str, str]]:
-    system = (
-        "你是小说续写系统中的 Information Extractor 节点。"
-        "请从候选正文中抽取可以写入状态层的稳定更新。"
-        "输出必须是 JSON 对象，不要输出任何额外说明。"
-        "不要输出猜测性内容，不要输出纯风格评论。"
-        "JSON 规则：键名和字符串必须用双引号；不要使用 markdown 代码块；"
-        "不要输出注释；不要输出尾逗号；字符串中的换行必须使用\\n转义。"
-    )
+    system = compose_system_prompt(purpose="state_extraction").system_content
     schema = {
         "accepted_updates": [
             {
@@ -191,12 +198,13 @@ def build_extraction_messages(state: NovelAgentState) -> list[dict[str, str]]:
         for event in state.story.event_log[-5:]
         if _truncate_text(event.summary, max_chars=80)
     )
+    world_rules = "; ".join(_compact_lines(list(state.story.world_rules), max_items=8, max_item_chars=70))
     user = (
         f"章节号: {state.chapter.chapter_number}\n"
-        f"正文:\n{state.draft.content}\n\n"
-        f"已有世界规则: {'; '.join(_compact_lines(list(state.story.world_rules), max_items=8, max_item_chars=70))}\n"
+        f"候选正文:\n{state.draft.content}\n\n"
+        f"已有世界规则: {world_rules or '无'}\n"
         f"已有事件: {existing_events or '无'}\n"
-        "请抽取新增状态，并按如下 schema 输出 JSON:\n"
+        "请从候选正文中抽取新增的稳定状态更新，并严格按照下面的 schema 输出 JSON:\n"
         f"{json.dumps(schema, ensure_ascii=False)}"
     )
     return [
