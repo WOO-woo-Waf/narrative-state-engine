@@ -50,6 +50,7 @@ from narrative_state_engine.models import (
 )
 from narrative_state_engine.storage.repository import StoryStateRepository
 from narrative_state_engine.storage.uow import InMemoryUnitOfWork, UnitOfWork
+from narrative_state_engine.task_scope import normalize_task_id
 
 logger = get_logger()
 
@@ -76,6 +77,29 @@ DEFAULT_SECTION_BUDGETS_FOR_MEMORY = {
     "scene_case_evidence": 900,
 }
 
+DEMO_PLACEHOLDER_PLOT_BEATS = {
+    "主角锁定一个可验证的新推进点。",
+}
+
+
+def _is_placeholder_plot_thread_name(name: str) -> bool:
+    return str(name or "").strip() in {"主线任务", "示例主线", "demo-main-arc"}
+
+
+def _is_placeholder_plot_beat(beat: str) -> bool:
+    return str(beat or "").strip() in DEMO_PLACEHOLDER_PLOT_BEATS
+
+
+def _choose_planned_beat(state: NovelAgentState) -> tuple[str, str]:
+    objective = str(state.chapter.objective or "").strip()
+    if state.story.major_arcs:
+        arc = state.story.major_arcs[0]
+        arc_beat = str(arc.next_expected_beat or arc.name or "").strip()
+        if objective and (_is_placeholder_plot_beat(arc_beat) or _is_placeholder_plot_thread_name(arc.name)):
+            return objective, ""
+        return arc_beat, arc.thread_id
+    return objective, ""
+
 
 class DraftGenerator(Protocol):
     def generate(self, state: NovelAgentState) -> DraftStructuredOutput:
@@ -90,11 +114,8 @@ class InformationExtractor(Protocol):
 class TemplateDraftGenerator:
     def generate(self, state: NovelAgentState) -> DraftStructuredOutput:
         protagonist = state.story.characters[0].name if state.story.characters else "主角"
-        planned_beat = (
-            state.story.major_arcs[0].next_expected_beat
-            if state.story.major_arcs
-            else state.chapter.objective or "推进当前冲突"
-        )
+        planned_beat, _ = _choose_planned_beat(state)
+        planned_beat = planned_beat or "推进当前冲突"
         scene_hint = state.chapter.scene_cards[0] if state.chapter.scene_cards else "当前场景"
         previous_summary = (state.chapter.latest_summary or "").strip()
         open_question = state.chapter.open_questions[0] if state.chapter.open_questions else ""
@@ -854,8 +875,18 @@ def domain_context_builder(state: NovelAgentState, _: NodeRuntime) -> NovelAgent
         "compressed_memory": "；".join(
             item.summary for item in state.domain.compressed_memory[:4] if item.summary
         )[:2400],
+        "setting_systems": _setting_system_context(state),
         "character_cards": "；".join(
-            f"{item.name}:{','.join(item.voice_profile[:3])}"
+            (
+                f"{item.name}:身份={','.join(item.identity_tags[:3])};"
+                f"性格={','.join(item.stable_traits[:3])};"
+                f"目标={','.join(item.current_goals[:2])};"
+                f"知识边界={','.join(item.knowledge_boundary[:2])};"
+                f"口吻={','.join(item.voice_profile[:3])};"
+                f"动作={','.join(item.gesture_patterns[:2])};"
+                f"决策={','.join(item.decision_patterns[:2])};"
+                f"禁区={','.join((item.dialogue_do_not + item.forbidden_actions + item.forbidden_changes)[:3])}"
+            )
             for item in state.domain.characters[:8]
         ),
         "plot_threads": "；".join(
@@ -879,6 +910,32 @@ def domain_context_builder(state: NovelAgentState, _: NodeRuntime) -> NovelAgent
     return state
 
 
+def _setting_system_context(state: NovelAgentState) -> str:
+    groups = [
+        ("概念", state.domain.world_concepts),
+        ("体系", state.domain.power_systems),
+        ("等级", state.domain.system_ranks),
+        ("功法技能", state.domain.techniques),
+        ("资源", state.domain.resource_concepts),
+        ("机制", state.domain.rule_mechanisms),
+        ("术语", state.domain.terminology),
+    ]
+    rows: list[str] = []
+    for label, items in groups:
+        for item in items[:8]:
+            parts = [item.name]
+            if item.definition:
+                parts.append(item.definition[:80])
+            if item.rules:
+                parts.append("规则:" + "/".join(item.rules[:2])[:120])
+            if item.limitations:
+                parts.append("限制:" + "/".join(item.limitations[:2])[:120])
+            text = " ".join(part for part in parts if part).strip()
+            if text:
+                rows.append(f"{label}:{text}")
+    return "；".join(rows)[:1800]
+
+
 def state_composer(state: NovelAgentState, _: NodeRuntime) -> NovelAgentState:
     set_action("state_composer")
     fragments = [
@@ -894,12 +951,12 @@ def state_composer(state: NovelAgentState, _: NodeRuntime) -> NovelAgentState:
 
 def plot_planner(state: NovelAgentState, _: NodeRuntime) -> NovelAgentState:
     set_action("plot_planner")
-    if state.story.major_arcs:
-        arc = state.story.major_arcs[0]
-        state.metadata["selected_plot_thread"] = arc.thread_id
-        state.metadata["planned_beat"] = arc.next_expected_beat or arc.name
+    planned_beat, selected_thread = _choose_planned_beat(state)
+    if selected_thread:
+        state.metadata["selected_plot_thread"] = selected_thread
     else:
-        state.metadata["planned_beat"] = state.chapter.objective
+        state.metadata.pop("selected_plot_thread", None)
+    state.metadata["planned_beat"] = planned_beat
     logger.info(f"planned beat: {state.metadata.get('planned_beat')}")
     return state
 
@@ -911,14 +968,17 @@ def evidence_retrieval(state: NovelAgentState, runtime: NodeRuntime) -> NovelAge
     event_cases: list[dict] = []
 
     if runtime.repository is not None:
+        task_id = normalize_task_id(state.metadata.get("task_id"), state.story.story_id)
         try:
             snippets = runtime.repository.load_style_snippets(
                 state.story.story_id,
+                task_id=task_id,
                 snippet_types=snippet_types,
                 limit=max(sum(DEFAULT_SNIPPET_QUOTAS.values()) * 4, 24),
             )
             event_cases = runtime.repository.load_event_style_cases(
                 state.story.story_id,
+                task_id=task_id,
                 limit=12,
             )
         except Exception as exc:
@@ -938,6 +998,7 @@ def evidence_retrieval(state: NovelAgentState, runtime: NodeRuntime) -> NovelAge
         try:
             hybrid_result = runtime.hybrid_search_service.search(
                 story_id=state.story.story_id,
+                task_id=normalize_task_id(state.metadata.get("task_id"), state.story.story_id),
                 query_text=_build_pipeline_query_text(state),
                 characters=[character.character_id for character in state.story.characters[:6]],
                 plot_threads=[thread.thread_id for thread in state.story.major_arcs[:4]],
@@ -1245,6 +1306,16 @@ def consistency_validator(state: NovelAgentState, _: NodeRuntime) -> NovelAgentS
                 code="world_rule_violation",
                 severity=str(world_issue.get("severity", "error")),
                 message=world_issue["message"],
+            )
+        )
+
+    for setting_issue in _detect_setting_system_violations(state):
+        rule_violations.append(setting_issue["message"])
+        issues.append(
+            ValidationIssue(
+                code="setting_system_violation",
+                severity=str(setting_issue.get("severity", "error")),
+                message=setting_issue["message"],
             )
         )
 
@@ -1600,6 +1671,34 @@ def character_consistency_evaluator(state: NovelAgentState, _: NodeRuntime) -> N
                         "suggested_repair": "把该信息改为未确认线索或延后揭示。",
                     }
                 )
+        for marker in card.forbidden_changes:
+            if marker and marker in change_text:
+                issues.append(
+                    {
+                        "character_id": card.character_id,
+                        "issue_type": "forbidden_character_change",
+                        "severity": "error",
+                        "evidence": marker,
+                        "expected_constraint": "角色变化不能越过作者锁定的禁区。",
+                        "suggested_repair": f"移除或延后 `{marker}` 对应变化。",
+                    }
+                )
+        dynamic = next(
+            (item for item in state.domain.character_dynamic_states if item.character_id == card.character_id),
+            None,
+        )
+        if card.arc_stage and dynamic and dynamic.arc_stage and card.arc_stage not in {"", dynamic.arc_stage, "baseline"}:
+            if card.arc_stage in draft_text and dynamic.arc_stage not in draft_text:
+                issues.append(
+                    {
+                        "character_id": card.character_id,
+                        "issue_type": "arc_stage_jump",
+                        "severity": "warning",
+                        "evidence": card.arc_stage,
+                        "expected_constraint": "角色弧线阶段需要有过渡。",
+                        "suggested_repair": "补足阶段过渡，或把该变化降级为苗头。",
+                    }
+                )
 
     status = "failed" if any(item["severity"] == "error" for item in issues) else "passed"
     score = max(0.0, 1.0 - 0.2 * len(issues))
@@ -1629,8 +1728,39 @@ def character_consistency_evaluator(state: NovelAgentState, _: NodeRuntime) -> N
                 related_entity_id=item["character_id"],
             )
         )
+
     logger.info(f"character consistency status: {status} issues={len(issues)}")
     return state
+
+
+def _detect_setting_system_violations(state: NovelAgentState) -> list[dict[str, str]]:
+    target_text = _draft_and_change_text(state)
+    if not target_text:
+        return []
+    violations: list[dict[str, str]] = []
+    mechanisms = list(state.domain.rule_mechanisms)
+    for mechanism in mechanisms:
+        checks = list(mechanism.limitations or []) + list(mechanism.rules or [])
+        for rule_text in checks:
+            forbidden_terms = _extract_forbidden_terms(str(rule_text))
+            matched = [
+                term
+                for term in forbidden_terms
+                if term and _term_in_content(term=term, content=target_text, content_lower=target_text.lower())
+            ]
+            if not matched:
+                continue
+            violations.append(
+                {
+                    "concept_id": mechanism.concept_id,
+                    "severity": "error",
+                    "message": (
+                        f"setting mechanism `{mechanism.name or mechanism.concept_id}` "
+                        f"限制被触发: {', '.join(matched[:4])}"
+                    ),
+                }
+            )
+    return violations
 
 
 def plot_alignment_evaluator(state: NovelAgentState, _: NodeRuntime) -> NovelAgentState:
@@ -1781,6 +1911,7 @@ def style_evaluator(state: NovelAgentState, _: NodeRuntime) -> NovelAgentState:
 def _build_style_drift_report(state: NovelAgentState) -> StyleDriftReport:
     content = state.draft.content or ""
     sentences = [item for item in re.split(r"(?<=[。！？!?])", content) if item.strip()]
+    paragraphs = [item for item in re.split(r"\n\s*\n", content.strip()) if item.strip()]
     sentence_lengths = [len(item.strip()) for item in sentences]
     avg_sentence_len = sum(sentence_lengths) / max(len(sentence_lengths), 1)
     target_distribution = state.style.sentence_length_distribution or {}
@@ -1791,6 +1922,16 @@ def _build_style_drift_report(state: NovelAgentState) -> StyleDriftReport:
     dialogue_count = len(re.findall(r"[“\"].*?[”\"]", content))
     dialogue_ratio = dialogue_count / max(len(sentences), 1)
     dialogue_delta = round(abs(dialogue_ratio - float(state.style.dialogue_ratio or 0.0)), 4)
+    paragraph_lengths = [len(item) for item in paragraphs]
+    avg_paragraph_len = sum(paragraph_lengths) / max(len(paragraph_lengths), 1)
+    paragraph_delta = round(min(abs(avg_paragraph_len - 180) / 500, 1.0), 4) if paragraphs else 0.0
+
+    actual_mix = _actual_description_mix(content)
+    target_mix = state.style.description_mix or {}
+    mix_delta = {
+        key: round(abs(float(actual_mix.get(key, 0.0)) - float(target_mix.get(key, 0.0))), 4)
+        for key in sorted(set(actual_mix) | set(target_mix))
+    }
 
     lexical = [item for item in state.style.lexical_fingerprint if item]
     lexical_hits = [item for item in lexical if item in content]
@@ -1803,11 +1944,14 @@ def _build_style_drift_report(state: NovelAgentState) -> StyleDriftReport:
     forbidden_hits = [
         item for item in state.style.forbidden_patterns + state.style.negative_style_rules if item and item in content
     ]
+    exemplar_score = _style_exemplar_similarity(state, content)
     score = 1.0
     score -= min(sentence_delta, 0.35)
     score -= min(dialogue_delta, 0.35)
+    score -= min(sum(mix_delta.values()) / max(len(mix_delta), 1), 0.25)
     score -= (1.0 - lexical_score) * 0.15
     score -= (1.0 - rhetoric_score) * 0.15
+    score -= (1.0 - exemplar_score) * 0.1
     score -= min(len(forbidden_hits) * 0.2, 0.4)
     score = max(score, 0.0)
 
@@ -1816,10 +1960,18 @@ def _build_style_drift_report(state: NovelAgentState) -> StyleDriftReport:
         hints.append("缩短长句，增加短句收束。")
     if dialogue_delta > 0.25:
         hints.append("调整对话比例，使其贴近原文风格画像。")
+    if mix_delta.get("action", 0.0) > 0.25:
+        hints.append("调整动作句密度，避免只靠解释性旁白推进。")
+    if mix_delta.get("environment", 0.0) > 0.25:
+        hints.append("环境描写保持功能性，不要变成散文化空镜。")
+    if mix_delta.get("dialogue", 0.0) > 0.25:
+        hints.append("对话改为贴近角色口吻的短促交互。")
     if lexical and lexical_score < 0.2:
         hints.append("适当恢复原文词汇指纹中的高频表达。")
     if forbidden_hits:
         hints.append("移除命中的禁止风格模式。")
+    if exemplar_score < 0.2:
+        hints.append("参考已检索原文样例的句式节奏和收束方式。")
 
     return StyleDriftReport(
         report_id=f"style-report-{state.thread.request_id or state.thread.thread_id}",
@@ -1827,12 +1979,49 @@ def _build_style_drift_report(state: NovelAgentState) -> StyleDriftReport:
         overall_style_score=round(score, 4),
         sentence_length_delta=sentence_delta,
         dialogue_ratio_delta=dialogue_delta,
-        description_mix_delta={},
+        description_mix_delta=mix_delta,
+        paragraph_length_delta=paragraph_delta,
         lexical_overlap_score=round(lexical_score, 4),
         rhetoric_match_score=round(rhetoric_score, 4),
+        exemplar_similarity_score=round(exemplar_score, 4),
         forbidden_pattern_hits=forbidden_hits,
         repair_hints=hints,
     )
+
+
+def _actual_description_mix(content: str) -> dict[str, float]:
+    sentences = [item for item in re.split(r"(?<=[。！？!?])", content) if item.strip()]
+    total = max(len(sentences), 1)
+    markers = {
+        "action": ["走", "跑", "推", "拉", "抬", "转", "停", "握", "退", "落"],
+        "expression": ["目光", "神色", "表情", "眉", "眼"],
+        "appearance": ["衣", "发", "脸", "身形", "肩", "手指"],
+        "environment": ["风", "雨", "夜", "雪", "门", "窗", "街", "灯", "山"],
+        "inner_monologue": ["心想", "想到", "觉得", "意识到", "记起"],
+        "dialogue": ["“", "\""],
+    }
+    return {
+        key: round(len([sentence for sentence in sentences if any(marker in sentence for marker in values)]) / total, 4)
+        for key, values in markers.items()
+    }
+
+
+def _style_exemplar_similarity(state: NovelAgentState, content: str) -> float:
+    examples = []
+    evidence = state.analysis.evidence_pack.get("style_snippet_examples", {})
+    for rows in evidence.values():
+        examples.extend(str(item) for item in rows if str(item).strip())
+    if not examples:
+        examples.extend(str(item.get("text", "")) for item in state.analysis.snippet_bank[:12])
+    tokens = set(re.findall(r"[A-Za-z0-9_\u4e00-\u9fff]{2,}", content))
+    if not tokens or not examples:
+        return 1.0
+    exemplar_tokens = set()
+    for example in examples[:12]:
+        exemplar_tokens.update(re.findall(r"[A-Za-z0-9_\u4e00-\u9fff]{2,}", example))
+    if not exemplar_tokens:
+        return 1.0
+    return len(tokens & exemplar_tokens) / max(len(tokens | exemplar_tokens), 1)
 
 
 def _style_rhetoric_hits(content: str, markers: list[str]) -> list[str]:

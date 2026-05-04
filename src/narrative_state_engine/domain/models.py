@@ -71,6 +71,152 @@ class WorldRule(BaseModel):
     forbidden_implications: list[str] = Field(default_factory=list)
     required_implications: list[str] = Field(default_factory=list)
     source_span_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.7
+    status: str = "candidate"
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    author_locked: bool = False
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class WorldConcept(BaseModel):
+    concept_id: str
+    name: str
+    concept_type: str = "concept"
+    definition: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    rules: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    related_concepts: list[str] = Field(default_factory=list)
+    related_characters: list[str] = Field(default_factory=list)
+    source_span_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.7
+    status: str = "candidate"
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    author_locked: bool = False
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PowerSystem(BaseModel):
+    concept_id: str
+    name: str
+    concept_type: str = "power_system"
+    definition: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    rules: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    related_concepts: list[str] = Field(default_factory=list)
+    related_characters: list[str] = Field(default_factory=list)
+    source_span_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.7
+    status: str = "candidate"
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    author_locked: bool = False
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class SystemRank(BaseModel):
+    concept_id: str
+    name: str
+    concept_type: str = "system_rank"
+    definition: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    rules: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    related_concepts: list[str] = Field(default_factory=list)
+    related_characters: list[str] = Field(default_factory=list)
+    source_span_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.7
+    status: str = "candidate"
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    author_locked: bool = False
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
+    system_id: str = ""
+    rank_order: int | None = None
+
+
+class TechniqueOrSkill(BaseModel):
+    concept_id: str
+    name: str
+    concept_type: str = "technique"
+    definition: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    rules: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    related_concepts: list[str] = Field(default_factory=list)
+    related_characters: list[str] = Field(default_factory=list)
+    source_span_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.7
+    status: str = "candidate"
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    author_locked: bool = False
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
+    system_id: str = ""
+    required_rank_id: str = ""
+    cost_or_price: list[str] = Field(default_factory=list)
+
+
+class ResourceConcept(BaseModel):
+    concept_id: str
+    name: str
+    concept_type: str = "resource"
+    definition: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    rules: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    related_concepts: list[str] = Field(default_factory=list)
+    related_characters: list[str] = Field(default_factory=list)
+    source_span_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.7
+    status: str = "candidate"
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    author_locked: bool = False
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
+    resource_type: str = ""
+
+
+class RuleMechanism(BaseModel):
+    concept_id: str
+    name: str
+    concept_type: str = "rule_mechanism"
+    definition: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    rules: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    related_concepts: list[str] = Field(default_factory=list)
+    related_characters: list[str] = Field(default_factory=list)
+    source_span_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.7
+    status: str = "candidate"
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    author_locked: bool = False
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
+    mechanism_type: str = ""
+
+
+class TerminologyEntry(BaseModel):
+    concept_id: str
+    name: str
+    concept_type: str = "terminology"
+    definition: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    rules: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    related_concepts: list[str] = Field(default_factory=list)
+    related_characters: list[str] = Field(default_factory=list)
+    source_span_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.7
+    status: str = "candidate"
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    author_locked: bool = False
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class LocationState(BaseModel):
@@ -133,8 +279,18 @@ class CharacterCard(BaseModel):
     dialogue_do_not: list[str] = Field(default_factory=list)
     gesture_patterns: list[str] = Field(default_factory=list)
     decision_patterns: list[str] = Field(default_factory=list)
+    relationship_views: dict[str, str] = Field(default_factory=dict)
+    arc_stage: str = ""
+    allowed_changes: list[str] = Field(default_factory=list)
     forbidden_actions: list[str] = Field(default_factory=list)
+    forbidden_changes: list[str] = Field(default_factory=list)
     source_span_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.7
+    status: str = "candidate"
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    author_locked: bool = False
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CharacterDynamicState(BaseModel):
@@ -150,6 +306,9 @@ class CharacterDynamicState(BaseModel):
     recent_decisions: list[str] = Field(default_factory=list)
     recent_changes: list[str] = Field(default_factory=list)
     arc_stage: str = ""
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RelationshipState(BaseModel):
@@ -165,6 +324,12 @@ class RelationshipState(BaseModel):
     shared_history: list[str] = Field(default_factory=list)
     unresolved_conflicts: list[str] = Field(default_factory=list)
     next_expected_shift: str = ""
+    confidence: float = 0.7
+    status: str = "candidate"
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    author_locked: bool = False
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class NarrativeEvent(BaseModel):
@@ -183,6 +348,12 @@ class NarrativeEvent(BaseModel):
     plot_thread_ids: list[str] = Field(default_factory=list)
     is_canonical: bool = True
     source_span_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.7
+    status: str = "confirmed"
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    author_locked: bool = False
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PlotThreadState(BaseModel):
@@ -199,6 +370,12 @@ class PlotThreadState(BaseModel):
     blocked_beats: list[str] = Field(default_factory=list)
     resolution_conditions: list[str] = Field(default_factory=list)
     related_character_ids: list[str] = Field(default_factory=list)
+    source_span_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.7
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    author_locked: bool = False
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ForeshadowingState(BaseModel):
@@ -213,6 +390,11 @@ class ForeshadowingState(BaseModel):
     reveal_policy: str = ""
     author_notes: list[str] = Field(default_factory=list)
     source_span_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.7
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    author_locked: bool = False
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SceneState(BaseModel):
@@ -231,6 +413,13 @@ class SceneState(BaseModel):
     beats: list[str] = Field(default_factory=list)
     emotional_curve: list[str] = Field(default_factory=list)
     style_requirements: list[str] = Field(default_factory=list)
+    source_span_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.7
+    status: str = "candidate"
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    author_locked: bool = False
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SceneAtmosphere(BaseModel):
@@ -267,6 +456,13 @@ class StyleProfile(BaseModel):
     lexical_fingerprint: list[str] = Field(default_factory=list)
     pacing_profile: dict[str, Any] = Field(default_factory=dict)
     forbidden_patterns: list[str] = Field(default_factory=list)
+    source_span_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.7
+    status: str = "candidate"
+    source_type: str = "analysis"
+    updated_by: str = "analysis"
+    author_locked: bool = False
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class StylePattern(BaseModel):
@@ -507,6 +703,8 @@ class StyleDriftReport(BaseModel):
     description_mix_delta: dict[str, float] = Field(default_factory=dict)
     lexical_overlap_score: float = 0.0
     rhetoric_match_score: float = 0.0
+    exemplar_similarity_score: float = 0.0
+    paragraph_length_delta: float = 0.0
     forbidden_pattern_hits: list[str] = Field(default_factory=list)
     repair_hints: list[str] = Field(default_factory=list)
 
@@ -548,10 +746,18 @@ class DomainState(BaseModel):
     source_spans: list[SourceSpan] = Field(default_factory=list)
     world: WorldState | None = None
     world_rules: list[WorldRule] = Field(default_factory=list)
+    world_concepts: list[WorldConcept] = Field(default_factory=list)
+    power_systems: list[PowerSystem] = Field(default_factory=list)
+    system_ranks: list[SystemRank] = Field(default_factory=list)
+    techniques: list[TechniqueOrSkill] = Field(default_factory=list)
+    resource_concepts: list[ResourceConcept] = Field(default_factory=list)
+    rule_mechanisms: list[RuleMechanism] = Field(default_factory=list)
+    terminology: list[TerminologyEntry] = Field(default_factory=list)
     locations: list[LocationState] = Field(default_factory=list)
     objects: list[ObjectState] = Field(default_factory=list)
     organizations: list[OrganizationState] = Field(default_factory=list)
     characters: list[CharacterCard] = Field(default_factory=list)
+    candidate_character_mentions: list[dict[str, Any]] = Field(default_factory=list)
     character_dynamic_states: list[CharacterDynamicState] = Field(default_factory=list)
     relationships: list[RelationshipState] = Field(default_factory=list)
     events: list[NarrativeEvent] = Field(default_factory=list)

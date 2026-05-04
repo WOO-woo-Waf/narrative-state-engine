@@ -12,11 +12,13 @@ from narrative_state_engine.analysis.llm_prompts import (
     build_chunk_analysis_messages,
     build_global_analysis_messages,
 )
+from narrative_state_engine.analysis.merging import StoryBibleMerger
 from narrative_state_engine.analysis.models import (
     AnalysisRunResult,
     ChapterAnalysisState,
     CharacterCardAsset,
     ChunkAnalysisState,
+    ConceptSystemAsset,
     EventStyleCaseAsset,
     GlobalStoryAnalysisState,
     PlotThreadAsset,
@@ -42,6 +44,7 @@ class LLMNovelAnalyzer:
         task_id: str = "",
         source_type: str = "",
         max_chunk_chars: int = 1800,
+        overlap_chars: int = 240,
         max_chunks: int | None = None,
         chunk_concurrency: int = 1,
         llm_call: LLMCall | None = None,
@@ -49,11 +52,14 @@ class LLMNovelAnalyzer:
     ) -> None:
         self.task_id = task_id
         self.source_type = source_type
-        self.chunker = TextChunker(max_chunk_chars=max_chunk_chars)
+        self.chunker = TextChunker(max_chunk_chars=max_chunk_chars, overlap_chars=overlap_chars)
         self.max_chunks = max_chunks
         self.chunk_concurrency = max(1, int(chunk_concurrency))
         self.llm_call = llm_call or _default_llm_call
-        self.fallback_analyzer = fallback_analyzer or NovelTextAnalyzer(max_chunk_chars=max_chunk_chars)
+        self.fallback_analyzer = fallback_analyzer or NovelTextAnalyzer(
+            max_chunk_chars=max_chunk_chars,
+            overlap_chars=overlap_chars,
+        )
         self.parser = JsonBlobParser()
 
     def analyze(self, *, source_text: str, story_id: str, story_title: str) -> AnalysisRunResult:
@@ -189,7 +195,10 @@ class LLMNovelAnalyzer:
         chunk_states = [_chunk_state(chunk, payload) for chunk, payload in zip(chunks, chunk_payloads)]
         chapter_states = [_chapter_state(payload, chunk_states) for payload in chapter_payloads]
         snippet_bank = _style_snippets_from_chunks(chunk_payloads)
-        story_bible = _story_bible_from_global(global_payload)
+        story_bible = StoryBibleMerger().merge(
+            _story_bible_from_global(global_payload),
+            chunk_states=chunk_states,
+        )
         event_cases = _event_cases_from_chapters(chapter_payloads)
         story_synopsis = str(global_payload.get("story_synopsis") or global_payload.get("task_summary") or "")[:4000]
         if not story_synopsis:
@@ -213,6 +222,15 @@ class LLMNovelAnalyzer:
             character_registry=[item.model_dump(mode="json") for item in story_bible.character_cards],
             plot_threads=[item.model_dump(mode="json") for item in story_bible.plot_threads],
             world_rules=[item.model_dump(mode="json") for item in story_bible.world_rules],
+            setting_systems={
+                "world_concepts": [item.model_dump(mode="json") for item in story_bible.world_concepts],
+                "power_systems": [item.model_dump(mode="json") for item in story_bible.power_systems],
+                "system_ranks": [item.model_dump(mode="json") for item in story_bible.system_ranks],
+                "techniques": [item.model_dump(mode="json") for item in story_bible.techniques],
+                "resource_concepts": [item.model_dump(mode="json") for item in story_bible.resource_concepts],
+                "rule_mechanisms": [item.model_dump(mode="json") for item in story_bible.rule_mechanisms],
+                "terminology": [item.model_dump(mode="json") for item in story_bible.terminology],
+            },
             timeline_state={"events": _list(global_payload.get("timeline")), "chapter_count": len(chapter_states)},
             continuity_constraints=_list(global_payload.get("continuation_constraints")),
             style_profile=story_bible.style_profile.model_dump(mode="json"),
@@ -344,11 +362,33 @@ def _story_bible_from_global(payload: dict[str, Any]) -> StoryBibleAsset:
             CharacterCardAsset(
                 character_id=str(row.get("character_id") or f"char-{idx:03d}"),
                 name=str(row.get("name") or f"角色{idx}"),
-                appearance_profile=_list(row.get("identity"))[:6],
+                aliases=_list(row.get("aliases"))[:8],
+                role_type=str(row.get("role_type") or row.get("role") or "candidate"),
+                identity_tags=_list(row.get("identity_tags") or row.get("identity"))[:8],
+                appearance_profile=_list(row.get("appearance_profile"))[:8],
+                stable_traits=_list(row.get("stable_traits"))[:8],
+                wounds_or_fears=_list(row.get("wounds_or_fears") or row.get("fears"))[:8],
+                current_goals=_list(row.get("current_goals") or row.get("goals"))[:8],
+                hidden_goals=_list(row.get("hidden_goals"))[:8],
+                moral_boundaries=_list(row.get("moral_boundaries"))[:8],
+                knowledge_boundary=_list(row.get("knowledge_boundary"))[:8],
                 voice_profile=_list(row.get("voice_profile"))[:8],
                 gesture_patterns=_list(row.get("gesture_patterns"))[:8],
-                dialogue_patterns=_list(row.get("voice_profile"))[:8],
-                state_transitions=_list(row.get("goals"))[:8],
+                dialogue_patterns=_list(row.get("dialogue_patterns") or row.get("voice_profile"))[:8],
+                dialogue_do=_list(row.get("dialogue_do"))[:8],
+                dialogue_do_not=_list(row.get("dialogue_do_not"))[:8],
+                decision_patterns=_list(row.get("decision_patterns"))[:8],
+                relationship_views=_dict(row.get("relationship_views")),
+                arc_stage=str(row.get("arc_stage") or ""),
+                forbidden_actions=_list(row.get("forbidden_actions"))[:8],
+                state_transitions=_list(row.get("state_transitions") or row.get("goals"))[:8],
+                source_span_ids=_list(row.get("source_span_ids"))[:12],
+                confidence=_float(row.get("confidence"), 0.75),
+                status=str(row.get("status") or "candidate"),
+                source_type=str(row.get("source_type") or "analysis"),
+                updated_by=str(row.get("updated_by") or "analysis"),
+                author_locked=bool(row.get("author_locked", False)),
+                revision_history=_list(row.get("revision_history"))[:12],
             )
         )
     plot_threads = []
@@ -370,19 +410,70 @@ def _story_bible_from_global(payload: dict[str, Any]) -> StoryBibleAsset:
         if str(text).strip()
     ]
     style = _dict(payload.get("style_bible"))
+    setting_systems = _dict(payload.get("setting_systems"))
     return StoryBibleAsset(
         character_cards=cards or [CharacterCardAsset(character_id="char-001", name="protagonist")],
         plot_threads=plot_threads or [PlotThreadAsset(thread_id="arc-main", name="main-arc")],
         world_rules=world_rules or [WorldRuleAsset(rule_id="rule-001", rule_text="保持任务内 canon 连续。")],
+        world_concepts=_concept_assets(setting_systems.get("world_concepts"), "world_concept"),
+        power_systems=_concept_assets(setting_systems.get("power_systems"), "power_system"),
+        system_ranks=_concept_assets(setting_systems.get("system_ranks"), "system_rank"),
+        techniques=_concept_assets(setting_systems.get("techniques"), "technique"),
+        resource_concepts=_concept_assets(setting_systems.get("resource_concepts"), "resource"),
+        rule_mechanisms=_concept_assets(setting_systems.get("rule_mechanisms"), "rule_mechanism"),
+        terminology=_concept_assets(setting_systems.get("terminology"), "terminology"),
+        candidate_character_mentions=[
+            dict(item)
+            for item in _list(payload.get("candidate_character_mentions"))
+            if isinstance(item, dict)
+        ],
         style_profile=StyleProfileAsset(
+            narrative_pov=str(style.get("narrative_pov") or ""),
+            tense=str(style.get("tense") or ""),
+            narrative_distance=str(style.get("narrative_distance") or ""),
             sentence_length_distribution=_dict(style.get("sentence_length_distribution")),
+            paragraph_length_distribution=_dict(style.get("paragraph_length_distribution")),
             description_mix=_dict(style.get("description_mix")),
+            dialogue_ratio=_float(style.get("dialogue_ratio"), 0.0),
             dialogue_signature=_dict(style.get("dialogue_signature")),
             rhetoric_markers=_list(style.get("rhetoric_markers")),
             lexical_fingerprint=_list(style.get("lexical_fingerprint")),
+            pacing_profile=_dict(style.get("pacing_profile")),
+            chapter_ending_patterns=_list(style.get("chapter_ending_patterns")),
             negative_style_rules=_list(style.get("negative_style_rules")),
         ),
     )
+
+
+def _concept_assets(value: Any, default_type: str) -> list[ConceptSystemAsset]:
+    assets: list[ConceptSystemAsset] = []
+    for idx, item in enumerate(_list(value), start=1):
+        row = _dict(item)
+        if not row and isinstance(item, str):
+            row = {"name": item, "definition": item}
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        concept_type = str(row.get("concept_type") or default_type)
+        assets.append(
+            ConceptSystemAsset(
+                concept_id=str(row.get("concept_id") or f"{default_type}-{idx:03d}"),
+                name=name,
+                concept_type=concept_type,
+                definition=str(row.get("definition") or "")[:500],
+                aliases=_list(row.get("aliases"))[:12],
+                rules=_list(row.get("rules"))[:12],
+                limitations=_list(row.get("limitations"))[:12],
+                related_concepts=_list(row.get("related_concepts"))[:12],
+                related_characters=_list(row.get("related_characters"))[:12],
+                source_span_ids=_list(row.get("source_span_ids"))[:12],
+                confidence=_float(row.get("confidence"), 0.7),
+                status=str(row.get("status") or "candidate"),
+                author_locked=bool(row.get("author_locked", False)),
+                metadata=_dict(row.get("metadata")),
+            )
+        )
+    return assets
 
 
 def _event_cases_from_chapters(chapter_payloads: list[dict[str, Any]]) -> list[EventStyleCaseAsset]:
@@ -427,6 +518,13 @@ def _dict(value: Any) -> dict[str, Any]:
 def _int(value: Any, default: int) -> int:
     try:
         return int(value)
+    except Exception:
+        return default
+
+
+def _float(value: Any, default: float) -> float:
+    try:
+        return float(value)
     except Exception:
         return default
 

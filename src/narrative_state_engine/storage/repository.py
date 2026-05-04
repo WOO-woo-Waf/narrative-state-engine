@@ -12,6 +12,7 @@ from sqlalchemy.exc import ProgrammingError
 
 from narrative_state_engine.analysis.models import AnalysisRunResult
 from narrative_state_engine.models import NovelAgentState, StateChangeProposal, UpdateType
+from narrative_state_engine.task_scope import normalize_task_id, scoped_storage_id, state_task_id
 
 
 def _analysis_evidence_rows(analysis: AnalysisRunResult) -> list[dict[str, Any]]:
@@ -88,9 +89,14 @@ def _analysis_evidence_rows(analysis: AnalysisRunResult) -> list[dict[str, Any]]
                 item
                 for item in [
                     card.name,
-                    "身份/外观:" + "、".join(card.appearance_profile[:4]) if card.appearance_profile else "",
+                    "身份:" + "、".join(card.identity_tags[:4]) if card.identity_tags else "",
+                    "外观:" + "、".join(card.appearance_profile[:4]) if card.appearance_profile else "",
+                    "性格:" + "、".join(card.stable_traits[:4]) if card.stable_traits else "",
+                    "目标:" + "、".join(card.current_goals[:4]) if card.current_goals else "",
+                    "知识:" + "、".join(card.knowledge_boundary[:4]) if card.knowledge_boundary else "",
                     "口吻:" + "、".join(card.voice_profile[:4]) if card.voice_profile else "",
                     "动作:" + "、".join(card.gesture_patterns[:4]) if card.gesture_patterns else "",
+                    "决策:" + "、".join(card.decision_patterns[:4]) if card.decision_patterns else "",
                     "变化:" + "、".join(card.state_transitions[:4]) if card.state_transitions else "",
                 ]
                 if item
@@ -129,6 +135,36 @@ def _analysis_evidence_rows(analysis: AnalysisRunResult) -> list[dict[str, Any]]
             recency=1.0,
             metadata={"rule_id": rule.rule_id, "rule_type": rule.rule_type},
         )
+    setting_groups = [
+        ("world_concept", analysis.story_bible.world_concepts),
+        ("power_system", analysis.story_bible.power_systems),
+        ("system_rank", analysis.story_bible.system_ranks),
+        ("technique", analysis.story_bible.techniques),
+        ("resource", analysis.story_bible.resource_concepts),
+        ("rule_mechanism", analysis.story_bible.rule_mechanisms),
+        ("terminology", analysis.story_bible.terminology),
+    ]
+    for group_name, concepts in setting_groups:
+        for idx, concept in enumerate(concepts[:80], start=1):
+            add(
+                suffix=f"setting-{group_name}-{idx:03d}",
+                evidence_type=f"setting_{group_name}",
+                text_value="；".join(
+                    item
+                    for item in [
+                        concept.name,
+                        concept.definition,
+                        "规则:" + "、".join(concept.rules[:4]) if concept.rules else "",
+                        "限制:" + "、".join(concept.limitations[:4]) if concept.limitations else "",
+                    ]
+                    if item
+                ),
+                related_entities=list(concept.related_characters),
+                tags=["analysis", "setting_system", group_name],
+                importance=0.84 if concept.status == "confirmed" else 0.72,
+                recency=1.0,
+                metadata={"concept_id": concept.concept_id, "concept_type": concept.concept_type},
+            )
     for idx, snippet in enumerate(analysis.snippet_bank[:200], start=1):
         add(
             suffix=f"style-snippet-{idx:03d}",
@@ -150,7 +186,7 @@ def _analysis_recency(index: int, total: int) -> float:
 
 
 class StoryStateRepository(Protocol):
-    def get(self, story_id: str) -> NovelAgentState | None:
+    def get(self, story_id: str, task_id: str = "") -> NovelAgentState | None:
         ...
 
     def save(self, state: NovelAgentState) -> None:
@@ -163,6 +199,7 @@ class StoryStateRepository(Protocol):
         self,
         story_id: str,
         *,
+        task_id: str = "",
         analysis_version: str | None = None,
     ) -> dict[str, Any] | None:
         ...
@@ -186,15 +223,18 @@ class StoryStateRepository(Protocol):
         self,
         story_id: str,
         *,
+        task_id: str = "",
         snippet_types: list[str] | None = None,
         limit: int = 120,
     ) -> list[dict[str, Any]]:
+        task_id = normalize_task_id(task_id, story_id)
         ...
 
     def load_event_style_cases(
         self,
         story_id: str,
         *,
+        task_id: str = "",
         limit: int = 40,
     ) -> list[dict[str, Any]]:
         ...
@@ -277,6 +317,7 @@ class InMemoryStoryStateRepository:
         self,
         story_id: str,
         *,
+        task_id: str = "",
         analysis_version: str | None = None,
     ) -> dict[str, Any] | None:
         payload = self.analysis_runs.get(story_id)
@@ -327,6 +368,7 @@ class InMemoryStoryStateRepository:
         self,
         story_id: str,
         *,
+        task_id: str = "",
         snippet_types: list[str] | None = None,
         limit: int = 120,
     ) -> list[dict[str, Any]]:
@@ -340,15 +382,16 @@ class InMemoryStoryStateRepository:
         self,
         story_id: str,
         *,
+        task_id: str = "",
         limit: int = 40,
     ) -> list[dict[str, Any]]:
         return list(self.event_style_cases.get(story_id, []))[: max(limit, 0)]
 
-    def load_latest_story_bible(self, story_id: str) -> dict[str, Any] | None:
+    def load_latest_story_bible(self, story_id: str, task_id: str = "") -> dict[str, Any] | None:
         payload = self.story_bibles.get(story_id)
         return dict(payload) if payload else None
 
-    def get_by_version(self, story_id: str, version_no: int) -> NovelAgentState | None:
+    def get_by_version(self, story_id: str, version_no: int, task_id: str = "") -> NovelAgentState | None:
         rows = self.version_history.get(story_id, [])
         for row in rows:
             if int(row.get("version_no", 0)) == int(version_no):
@@ -426,19 +469,20 @@ class PostgreSQLStoryStateRepository:
             ).scalar()
         return bool(result)
 
-    def get(self, story_id: str) -> NovelAgentState | None:
+    def get(self, story_id: str, task_id: str = "") -> NovelAgentState | None:
+        task_id = normalize_task_id(task_id, story_id)
         with self.engine.begin() as conn:
             row = conn.execute(
                 text(
                     """
                     SELECT snapshot
                     FROM story_versions
-                    WHERE story_id = :story_id
+                    WHERE task_id = :task_id AND story_id = :story_id
                     ORDER BY version_no DESC
                     LIMIT 1
                     """
                 ),
-                {"story_id": story_id},
+                {"task_id": task_id, "story_id": story_id},
             ).mappings().first()
         if row is None:
             return None
@@ -447,6 +491,10 @@ class PostgreSQLStoryStateRepository:
     def save(self, state: NovelAgentState) -> None:
         snapshot = state.model_dump(mode="json")
         story_id = state.story.story_id
+        task_id = state_task_id(state)
+        state.metadata["task_id"] = task_id
+        snapshot.setdefault("metadata", {})
+        snapshot["metadata"]["task_id"] = task_id
 
         with self.engine.begin() as conn:
             version_no = conn.execute(
@@ -454,10 +502,10 @@ class PostgreSQLStoryStateRepository:
                     """
                     SELECT COALESCE(MAX(version_no), 0) + 1
                     FROM story_versions
-                    WHERE story_id = :story_id
+                    WHERE task_id = :task_id AND story_id = :story_id
                     """
                 ),
-                {"story_id": story_id},
+                {"task_id": task_id, "story_id": story_id},
             ).scalar_one()
 
             latest_bible_version_no = conn.execute(
@@ -465,12 +513,12 @@ class PostgreSQLStoryStateRepository:
                     """
                     SELECT version_no
                     FROM story_bible_versions
-                    WHERE story_id = :story_id
+                    WHERE task_id = :task_id AND story_id = :story_id
                     ORDER BY version_no DESC
                     LIMIT 1
                     """
                 ),
-                {"story_id": story_id},
+                {"task_id": task_id, "story_id": story_id},
             ).scalar()
 
             state.metadata["state_version_no"] = int(version_no)
@@ -504,15 +552,38 @@ class PostgreSQLStoryStateRepository:
                     "status": "active",
                 },
             )
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO task_runs (task_id, story_id, title, description, status, metadata, updated_at)
+                    VALUES (:task_id, :story_id, :title, :description, 'active', CAST(:metadata AS JSONB), NOW())
+                    ON CONFLICT (task_id) DO UPDATE
+                    SET story_id = EXCLUDED.story_id,
+                        title = EXCLUDED.title,
+                        description = COALESCE(NULLIF(EXCLUDED.description, ''), task_runs.description),
+                        status = 'active',
+                        metadata = task_runs.metadata || EXCLUDED.metadata,
+                        updated_at = NOW()
+                    """
+                ),
+                {
+                    "task_id": task_id,
+                    "story_id": story_id,
+                    "title": state.story.title,
+                    "description": state.story.premise,
+                    "metadata": json.dumps({"last_action": "save_state"}, ensure_ascii=False),
+                },
+            )
 
             conn.execute(
                 text(
                     """
-                    INSERT INTO story_versions (story_id, version_no, snapshot)
-                    VALUES (:story_id, :version_no, CAST(:snapshot AS JSONB))
+                    INSERT INTO story_versions (task_id, story_id, version_no, snapshot)
+                    VALUES (:task_id, :story_id, :version_no, CAST(:snapshot AS JSONB))
                     """
                 ),
                 {
+                    "task_id": task_id,
                     "story_id": story_id,
                     "version_no": version_no,
                     "snapshot": json.dumps(snapshot, ensure_ascii=False),
@@ -524,18 +595,19 @@ class PostgreSQLStoryStateRepository:
                     text(
                         """
                         INSERT INTO story_version_bible_links (
-                            story_id, state_version_no, bible_version_no, thread_id
+                            task_id, story_id, state_version_no, bible_version_no, thread_id
                         )
                         VALUES (
-                            :story_id, :state_version_no, :bible_version_no, :thread_id
+                            :task_id, :story_id, :state_version_no, :bible_version_no, :thread_id
                         )
-                        ON CONFLICT (story_id, state_version_no) DO UPDATE
+                        ON CONFLICT (task_id, story_id, state_version_no) DO UPDATE
                         SET bible_version_no = EXCLUDED.bible_version_no,
                             thread_id = EXCLUDED.thread_id,
                             created_at = NOW()
                         """
                     ),
                     {
+                        "task_id": task_id,
                         "story_id": story_id,
                         "state_version_no": int(version_no),
                         "bible_version_no": int(latest_bible_version_no),
@@ -546,8 +618,8 @@ class PostgreSQLStoryStateRepository:
             conn.execute(
                 text(
                     """
-                    INSERT INTO threads (thread_id, story_id, status)
-                    VALUES (:thread_id, :story_id, :status)
+                    INSERT INTO threads (thread_id, task_id, story_id, status)
+                    VALUES (:thread_id, :task_id, :story_id, :status)
                     ON CONFLICT (thread_id) DO UPDATE
                     SET story_id = EXCLUDED.story_id,
                         status = EXCLUDED.status
@@ -555,6 +627,7 @@ class PostgreSQLStoryStateRepository:
                 ),
                 {
                     "thread_id": state.thread.thread_id,
+                    "task_id": task_id,
                     "story_id": story_id,
                     "status": "active",
                 },
@@ -564,10 +637,10 @@ class PostgreSQLStoryStateRepository:
                 text(
                     """
                     INSERT INTO chapters (
-                        chapter_id, story_id, chapter_number, pov_character_id, summary, objective, content, status, updated_at
+                        chapter_id, task_id, story_id, chapter_number, pov_character_id, summary, objective, content, status, updated_at
                     )
                     VALUES (
-                        :chapter_id, :story_id, :chapter_number, :pov_character_id, :summary, :objective, :content, :status, NOW()
+                        :chapter_id, :task_id, :story_id, :chapter_number, :pov_character_id, :summary, :objective, :content, :status, NOW()
                     )
                     ON CONFLICT (chapter_id) DO UPDATE
                     SET summary = EXCLUDED.summary,
@@ -580,6 +653,7 @@ class PostgreSQLStoryStateRepository:
                 ),
                 {
                     "chapter_id": state.chapter.chapter_id,
+                    "task_id": task_id,
                     "story_id": story_id,
                     "chapter_number": state.chapter.chapter_number,
                     "pov_character_id": state.chapter.pov_character_id,
@@ -602,6 +676,8 @@ class PostgreSQLStoryStateRepository:
 
     def save_analysis_assets(self, analysis: AnalysisRunResult) -> None:
         summary = dict(analysis.summary)
+        task_id = normalize_task_id(summary.get("task_id"), analysis.story_id)
+        summary["task_id"] = task_id
         summary.setdefault("story_synopsis", analysis.story_synopsis)
         summary.setdefault("coverage", analysis.coverage)
         summary.setdefault("chapter_states", [item.model_dump(mode="json") for item in analysis.chapter_states])
@@ -634,22 +710,42 @@ class PostgreSQLStoryStateRepository:
                     "status": "active",
                 },
             )
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO task_runs (task_id, story_id, title, description, status, metadata, updated_at)
+                    VALUES (:task_id, :story_id, :title, 'Analysis task', 'active', CAST(:metadata AS JSONB), NOW())
+                    ON CONFLICT (task_id) DO UPDATE
+                    SET story_id = EXCLUDED.story_id,
+                        title = EXCLUDED.title,
+                        metadata = task_runs.metadata || EXCLUDED.metadata,
+                        updated_at = NOW()
+                    """
+                ),
+                {
+                    "task_id": task_id,
+                    "story_id": analysis.story_id,
+                    "title": analysis.story_title,
+                    "metadata": json.dumps({"last_action": "save_analysis", "analysis_version": analysis.analysis_version}, ensure_ascii=False),
+                },
+            )
 
             analysis_id = conn.execute(
                 text(
                     """
                     INSERT INTO analysis_runs (
-                        story_id, analysis_version, status,
+                        task_id, story_id, analysis_version, status,
                         result_summary, snippet_count, case_count, rule_count, conflict_count
                     )
                     VALUES (
-                        :story_id, :analysis_version, :status,
+                        :task_id, :story_id, :analysis_version, :status,
                         CAST(:result_summary AS JSONB), :snippet_count, :case_count, :rule_count, :conflict_count
                     )
                     RETURNING analysis_id
                     """
                 ),
                 {
+                    "task_id": task_id,
                     "story_id": analysis.story_id,
                     "analysis_version": analysis.analysis_version,
                     "status": "completed",
@@ -666,20 +762,21 @@ class PostgreSQLStoryStateRepository:
                     """
                     SELECT COALESCE(MAX(version_no), 0) + 1
                     FROM story_bible_versions
-                    WHERE story_id = :story_id
+                    WHERE task_id = :task_id AND story_id = :story_id
                     """
                 ),
-                {"story_id": analysis.story_id},
+                {"task_id": task_id, "story_id": analysis.story_id},
             ).scalar_one()
 
             conn.execute(
                 text(
                     """
-                    INSERT INTO story_bible_versions (story_id, analysis_id, bible_snapshot, version_no)
-                    VALUES (:story_id, :analysis_id, CAST(:bible_snapshot AS JSONB), :version_no)
+                    INSERT INTO story_bible_versions (task_id, story_id, analysis_id, bible_snapshot, version_no)
+                    VALUES (:task_id, :story_id, :analysis_id, CAST(:bible_snapshot AS JSONB), :version_no)
                     """
                 ),
                 {
+                    "task_id": task_id,
                     "story_id": analysis.story_id,
                     "analysis_id": analysis_id,
                     "bible_snapshot": json.dumps(analysis.story_bible.model_dump(mode="json"), ensure_ascii=False),
@@ -688,22 +785,22 @@ class PostgreSQLStoryStateRepository:
             )
 
             conn.execute(
-                text("DELETE FROM style_snippets WHERE story_id = :story_id"),
-                {"story_id": analysis.story_id},
+                text("DELETE FROM style_snippets WHERE task_id = :task_id AND story_id = :story_id"),
+                {"task_id": task_id, "story_id": analysis.story_id},
             )
             snippet_id_map: dict[str, str] = {}
             for snippet in analysis.snippet_bank:
-                scoped_snippet_id = f"{analysis.story_id}:{snippet.snippet_id}"
+                scoped_snippet_id = scoped_storage_id(task_id, analysis.story_id, snippet.snippet_id)
                 snippet_id_map[snippet.snippet_id] = scoped_snippet_id
                 conn.execute(
                     text(
                         """
                         INSERT INTO style_snippets (
-                            snippet_id, story_id, snippet_type, text, normalized_template,
+                            snippet_id, task_id, story_id, snippet_type, text, normalized_template,
                             style_tags, speaker_or_pov, chapter_number, source_offset
                         )
                         VALUES (
-                            :snippet_id, :story_id, :snippet_type, :text, :normalized_template,
+                            :snippet_id, :task_id, :story_id, :snippet_type, :text, :normalized_template,
                             CAST(:style_tags AS JSONB), :speaker_or_pov, :chapter_number, :source_offset
                         )
                         ON CONFLICT (snippet_id) DO UPDATE
@@ -718,6 +815,7 @@ class PostgreSQLStoryStateRepository:
                     ),
                     {
                         "snippet_id": scoped_snippet_id,
+                        "task_id": task_id,
                         "story_id": analysis.story_id,
                         "snippet_type": snippet.snippet_type.value,
                         "text": snippet.text,
@@ -730,21 +828,21 @@ class PostgreSQLStoryStateRepository:
                 )
 
             conn.execute(
-                text("DELETE FROM event_style_cases WHERE story_id = :story_id"),
-                {"story_id": analysis.story_id},
+                text("DELETE FROM event_style_cases WHERE task_id = :task_id AND story_id = :story_id"),
+                {"task_id": task_id, "story_id": analysis.story_id},
             )
             for case in analysis.event_style_cases:
-                scoped_case_id = f"{analysis.story_id}:{case.case_id}"
+                scoped_case_id = scoped_storage_id(task_id, analysis.story_id, case.case_id)
                 conn.execute(
                     text(
                         """
                         INSERT INTO event_style_cases (
-                            case_id, story_id, event_type, participants, emotion_curve,
+                            case_id, task_id, story_id, event_type, participants, emotion_curve,
                             action_sequence, expression_sequence, environment_sequence,
                             dialogue_turns, source_snippet_ids, chapter_number
                         )
                         VALUES (
-                            :case_id, :story_id, :event_type,
+                            :case_id, :task_id, :story_id, :event_type,
                             CAST(:participants AS JSONB), CAST(:emotion_curve AS JSONB),
                             CAST(:action_sequence AS JSONB), CAST(:expression_sequence AS JSONB),
                             CAST(:environment_sequence AS JSONB), CAST(:dialogue_turns AS JSONB),
@@ -764,6 +862,7 @@ class PostgreSQLStoryStateRepository:
                     ),
                     {
                         "case_id": scoped_case_id,
+                        "task_id": task_id,
                         "story_id": analysis.story_id,
                         "event_type": case.event_type,
                         "participants": json.dumps(case.participants, ensure_ascii=False),
@@ -780,20 +879,22 @@ class PostgreSQLStoryStateRepository:
                     },
                 )
 
-            self._index_analysis_evidence(conn, analysis=analysis, analysis_id=int(analysis_id))
+            self._index_analysis_evidence(conn, analysis=analysis, analysis_id=int(analysis_id), task_id=task_id)
 
     def load_analysis_run(
         self,
         story_id: str,
         *,
+        task_id: str = "",
         analysis_version: str | None = None,
     ) -> dict[str, Any] | None:
+        task_id = normalize_task_id(task_id, story_id)
         sql = """
             SELECT analysis_version, result_summary
             FROM analysis_runs
-            WHERE story_id = :story_id
+            WHERE task_id = :task_id AND story_id = :story_id
         """
-        params: dict[str, Any] = {"story_id": story_id}
+        params: dict[str, Any] = {"task_id": task_id, "story_id": story_id}
         if analysis_version:
             sql += " AND analysis_version = :analysis_version"
             params["analysis_version"] = analysis_version
@@ -810,27 +911,27 @@ class PostgreSQLStoryStateRepository:
         payload["analysis_version"] = str(payload.get("analysis_version", ""))
         return payload
 
-    def _index_analysis_evidence(self, conn, *, analysis: AnalysisRunResult, analysis_id: int) -> None:
+    def _index_analysis_evidence(self, conn, *, analysis: AnalysisRunResult, analysis_id: int, task_id: str) -> None:
         conn.execute(
             text(
                 """
                 DELETE FROM narrative_evidence_index
-                WHERE story_id = :story_id AND source_table = 'analysis_runs'
+                WHERE task_id = :task_id AND story_id = :story_id AND source_table = 'analysis_runs'
                 """
             ),
-            {"story_id": analysis.story_id},
+            {"task_id": task_id, "story_id": analysis.story_id},
         )
         for row in _analysis_evidence_rows(analysis):
             conn.execute(
                 text(
                     """
                     INSERT INTO narrative_evidence_index (
-                        evidence_id, story_id, evidence_type, source_table, source_id,
+                        evidence_id, task_id, story_id, evidence_type, source_table, source_id,
                         chapter_index, text, related_entities, related_plot_threads,
                         tags, canonical, importance, recency, tsv, metadata
                     )
                     VALUES (
-                        :evidence_id, :story_id, :evidence_type, 'analysis_runs', :source_id,
+                        :evidence_id, :task_id, :story_id, :evidence_type, 'analysis_runs', :source_id,
                         :chapter_index, :text, CAST(:related_entities AS JSONB),
                         CAST(:related_plot_threads AS JSONB), CAST(:tags AS JSONB),
                         TRUE, :importance, :recency, to_tsvector('simple', :text),
@@ -855,6 +956,8 @@ class PostgreSQLStoryStateRepository:
                 ),
                 {
                     **row,
+                    "evidence_id": scoped_storage_id(task_id, row.get("evidence_id")),
+                    "task_id": task_id,
                     "story_id": analysis.story_id,
                     "source_id": str(analysis_id),
                     "related_entities": json.dumps(row.get("related_entities", []), ensure_ascii=False),
@@ -863,6 +966,7 @@ class PostgreSQLStoryStateRepository:
                     "metadata": json.dumps(
                         {
                             **dict(row.get("metadata", {})),
+                            "task_id": task_id,
                             "analysis_version": analysis.analysis_version,
                             "source": "analysis",
                         },
@@ -936,9 +1040,11 @@ class PostgreSQLStoryStateRepository:
         self,
         story_id: str,
         *,
+        task_id: str = "",
         snippet_types: list[str] | None = None,
         limit: int = 120,
     ) -> list[dict[str, Any]]:
+        task_id = normalize_task_id(task_id, story_id)
         with self.engine.begin() as conn:
             rows = conn.execute(
                 text(
@@ -946,12 +1052,13 @@ class PostgreSQLStoryStateRepository:
                     SELECT snippet_id, snippet_type, text, normalized_template,
                            style_tags, speaker_or_pov, chapter_number, source_offset
                     FROM style_snippets
-                    WHERE story_id = :story_id
+                    WHERE task_id = :task_id AND story_id = :story_id
                     ORDER BY created_at DESC
                     LIMIT :limit
                     """
                 ),
                 {
+                    "task_id": task_id,
                     "story_id": story_id,
                     "limit": max(limit, 0),
                 },
@@ -967,8 +1074,10 @@ class PostgreSQLStoryStateRepository:
         self,
         story_id: str,
         *,
+        task_id: str = "",
         limit: int = 40,
     ) -> list[dict[str, Any]]:
+        task_id = normalize_task_id(task_id, story_id)
         with self.engine.begin() as conn:
             rows = conn.execute(
                 text(
@@ -977,31 +1086,33 @@ class PostgreSQLStoryStateRepository:
                            action_sequence, expression_sequence, environment_sequence,
                            dialogue_turns, source_snippet_ids, chapter_number
                     FROM event_style_cases
-                    WHERE story_id = :story_id
+                    WHERE task_id = :task_id AND story_id = :story_id
                     ORDER BY created_at DESC
                     LIMIT :limit
                     """
                 ),
                 {
+                    "task_id": task_id,
                     "story_id": story_id,
                     "limit": max(limit, 0),
                 },
             ).mappings().all()
         return [dict(row) for row in rows]
 
-    def load_latest_story_bible(self, story_id: str) -> dict[str, Any] | None:
+    def load_latest_story_bible(self, story_id: str, task_id: str = "") -> dict[str, Any] | None:
+        task_id = normalize_task_id(task_id, story_id)
         with self.engine.begin() as conn:
             row = conn.execute(
                 text(
                     """
                     SELECT bible_snapshot, version_no, analysis_id, created_at
                     FROM story_bible_versions
-                    WHERE story_id = :story_id
+                    WHERE task_id = :task_id AND story_id = :story_id
                     ORDER BY version_no DESC
                     LIMIT 1
                     """
                 ),
-                {"story_id": story_id},
+                {"task_id": task_id, "story_id": story_id},
             ).mappings().first()
         if row is None:
             return None
@@ -1011,18 +1122,20 @@ class PostgreSQLStoryStateRepository:
             payload["bible_snapshot"] = json.loads(snapshot)
         return payload
 
-    def get_by_version(self, story_id: str, version_no: int) -> NovelAgentState | None:
+    def get_by_version(self, story_id: str, version_no: int, task_id: str = "") -> NovelAgentState | None:
+        task_id = normalize_task_id(task_id, story_id)
         with self.engine.begin() as conn:
             row = conn.execute(
                 text(
                     """
                     SELECT snapshot
                     FROM story_versions
-                    WHERE story_id = :story_id AND version_no = :version_no
+                    WHERE task_id = :task_id AND story_id = :story_id AND version_no = :version_no
                     LIMIT 1
                     """
                 ),
                 {
+                    "task_id": task_id,
                     "story_id": story_id,
                     "version_no": int(version_no),
                 },
@@ -1069,20 +1182,22 @@ class PostgreSQLStoryStateRepository:
         return [dict(row) for row in rows]
 
     def _refresh_character_profiles(self, conn, state: NovelAgentState) -> None:
+        task_id = state_task_id(state)
         conn.execute(
-            text("DELETE FROM character_profiles WHERE story_id = :story_id"),
-            {"story_id": state.story.story_id},
+            text("DELETE FROM character_profiles WHERE task_id = :task_id AND story_id = :story_id"),
+            {"task_id": task_id, "story_id": state.story.story_id},
         )
         for character in state.story.characters:
             conn.execute(
                 text(
                     """
-                    INSERT INTO character_profiles (character_id, story_id, name, profile, updated_at)
-                    VALUES (:character_id, :story_id, :name, CAST(:profile AS JSONB), NOW())
+                    INSERT INTO character_profiles (character_id, task_id, story_id, name, profile, updated_at)
+                    VALUES (:character_id, :task_id, :story_id, :name, CAST(:profile AS JSONB), NOW())
                     """
                 ),
                 {
                     "character_id": character.character_id,
+                    "task_id": task_id,
                     "story_id": state.story.story_id,
                     "name": character.name,
                     "profile": json.dumps(character.model_dump(mode="json"), ensure_ascii=False),
@@ -1090,19 +1205,21 @@ class PostgreSQLStoryStateRepository:
             )
 
     def _refresh_world_facts(self, conn, state: NovelAgentState) -> None:
+        task_id = state_task_id(state)
         conn.execute(
-            text("DELETE FROM world_facts WHERE story_id = :story_id"),
-            {"story_id": state.story.story_id},
+            text("DELETE FROM world_facts WHERE task_id = :task_id AND story_id = :story_id"),
+            {"task_id": task_id, "story_id": state.story.story_id},
         )
 
         for fact in state.story.public_facts:
-            self._insert_world_fact(conn, state.story.story_id, "public_fact", fact, is_secret=False, conflict_mark=False)
+            self._insert_world_fact(conn, task_id, state.story.story_id, "public_fact", fact, is_secret=False, conflict_mark=False)
         for fact in state.story.secret_facts:
-            self._insert_world_fact(conn, state.story.story_id, "secret_fact", fact, is_secret=True, conflict_mark=False)
+            self._insert_world_fact(conn, task_id, state.story.story_id, "secret_fact", fact, is_secret=True, conflict_mark=False)
         for change in state.commit.conflict_changes:
             if change.update_type == UpdateType.WORLD_FACT:
                 self._insert_world_fact(
                     conn,
+                    task_id,
                     state.story.story_id,
                     "conflict_fact",
                     change.summary,
@@ -1113,6 +1230,7 @@ class PostgreSQLStoryStateRepository:
     def _insert_world_fact(
         self,
         conn,
+        task_id: str,
         story_id: str,
         fact_type: str,
         content: str,
@@ -1123,11 +1241,12 @@ class PostgreSQLStoryStateRepository:
         conn.execute(
             text(
                 """
-                INSERT INTO world_facts (story_id, fact_type, content, is_secret, conflict_mark)
-                VALUES (:story_id, :fact_type, :content, :is_secret, :conflict_mark)
+                INSERT INTO world_facts (task_id, story_id, fact_type, content, is_secret, conflict_mark)
+                VALUES (:task_id, :story_id, :fact_type, :content, :is_secret, :conflict_mark)
                 """
             ),
             {
+                "task_id": task_id,
                 "story_id": story_id,
                 "fact_type": fact_type,
                 "content": content,
@@ -1137,20 +1256,22 @@ class PostgreSQLStoryStateRepository:
         )
 
     def _refresh_plot_threads(self, conn, state: NovelAgentState) -> None:
+        task_id = state_task_id(state)
         conn.execute(
-            text("DELETE FROM plot_threads WHERE story_id = :story_id"),
-            {"story_id": state.story.story_id},
+            text("DELETE FROM plot_threads WHERE task_id = :task_id AND story_id = :story_id"),
+            {"task_id": task_id, "story_id": state.story.story_id},
         )
         for arc in state.story.major_arcs:
             conn.execute(
                 text(
                     """
-                    INSERT INTO plot_threads (plot_thread_id, story_id, name, status, stakes, next_expected_beat, updated_at)
-                    VALUES (:plot_thread_id, :story_id, :name, :status, :stakes, :next_expected_beat, NOW())
+                    INSERT INTO plot_threads (plot_thread_id, task_id, story_id, name, status, stakes, next_expected_beat, updated_at)
+                    VALUES (:plot_thread_id, :task_id, :story_id, :name, :status, :stakes, :next_expected_beat, NOW())
                     """
                 ),
                 {
                     "plot_thread_id": arc.thread_id,
+                    "task_id": task_id,
                     "story_id": state.story.story_id,
                     "name": arc.name,
                     "status": arc.status,
@@ -1160,24 +1281,26 @@ class PostgreSQLStoryStateRepository:
             )
 
     def _refresh_episodic_events(self, conn, state: NovelAgentState) -> None:
+        task_id = state_task_id(state)
         conn.execute(
-            text("DELETE FROM episodic_events WHERE story_id = :story_id"),
-            {"story_id": state.story.story_id},
+            text("DELETE FROM episodic_events WHERE task_id = :task_id AND story_id = :story_id"),
+            {"task_id": task_id, "story_id": state.story.story_id},
         )
         for event in state.story.event_log:
             conn.execute(
                 text(
                     """
                     INSERT INTO episodic_events (
-                        event_id, story_id, chapter_id, summary, location, participants, is_canonical
+                        event_id, task_id, story_id, chapter_id, summary, location, participants, is_canonical
                     )
                     VALUES (
-                        :event_id, :story_id, :chapter_id, :summary, :location, CAST(:participants AS JSONB), :is_canonical
+                        :event_id, :task_id, :story_id, :chapter_id, :summary, :location, CAST(:participants AS JSONB), :is_canonical
                     )
                     """
                 ),
                 {
                     "event_id": event.event_id,
+                    "task_id": task_id,
                     "story_id": state.story.story_id,
                     "chapter_id": state.chapter.chapter_id,
                     "summary": event.summary,
@@ -1188,28 +1311,31 @@ class PostgreSQLStoryStateRepository:
             )
 
     def _refresh_style_profiles(self, conn, state: NovelAgentState) -> None:
+        task_id = state_task_id(state)
         conn.execute(
-            text("DELETE FROM style_profiles WHERE story_id = :story_id"),
-            {"story_id": state.story.story_id},
+            text("DELETE FROM style_profiles WHERE task_id = :task_id AND story_id = :story_id"),
+            {"task_id": task_id, "story_id": state.story.story_id},
         )
         conn.execute(
             text(
                 """
-                INSERT INTO style_profiles (profile_id, story_id, profile, updated_at)
-                VALUES (:profile_id, :story_id, CAST(:profile AS JSONB), NOW())
+                INSERT INTO style_profiles (profile_id, task_id, story_id, profile, updated_at)
+                VALUES (:profile_id, :task_id, :story_id, CAST(:profile AS JSONB), NOW())
                 """
             ),
             {
                 "profile_id": state.style.profile_id,
+                "task_id": task_id,
                 "story_id": state.story.story_id,
                 "profile": json.dumps(state.style.model_dump(mode="json"), ensure_ascii=False),
             },
         )
 
     def _refresh_user_preferences(self, conn, state: NovelAgentState) -> None:
+        task_id = state_task_id(state)
         conn.execute(
-            text("DELETE FROM user_preferences WHERE story_id = :story_id"),
-            {"story_id": state.story.story_id},
+            text("DELETE FROM user_preferences WHERE task_id = :task_id AND story_id = :story_id"),
+            {"task_id": task_id, "story_id": state.story.story_id},
         )
         preference_rows = [
             ("pace", state.preference.pace),
@@ -1222,14 +1348,15 @@ class PostgreSQLStoryStateRepository:
                 text(
                     """
                     INSERT INTO user_preferences (
-                        story_id, thread_id, preference_key, preference_value, is_confirmed
+                        task_id, story_id, thread_id, preference_key, preference_value, is_confirmed
                     )
                     VALUES (
-                        :story_id, :thread_id, :preference_key, CAST(:preference_value AS JSONB), :is_confirmed
+                        :task_id, :story_id, :thread_id, :preference_key, CAST(:preference_value AS JSONB), :is_confirmed
                     )
                     """
                 ),
                 {
+                    "task_id": task_id,
                     "story_id": state.story.story_id,
                     "thread_id": state.thread.thread_id,
                     "preference_key": key,
@@ -1239,14 +1366,15 @@ class PostgreSQLStoryStateRepository:
             )
 
     def _insert_validation_run(self, conn, state: NovelAgentState) -> None:
+        task_id = state_task_id(state)
         conn.execute(
             text(
                 """
                 INSERT INTO validation_runs (
-                    thread_id, chapter_id, status, consistency_issues, style_issues, requires_human_review
+                    task_id, thread_id, chapter_id, status, consistency_issues, style_issues, requires_human_review
                 )
                 VALUES (
-                    :thread_id, :chapter_id, :status,
+                    :task_id, :thread_id, :chapter_id, :status,
                     CAST(:consistency_issues AS JSONB),
                     CAST(:style_issues AS JSONB),
                     :requires_human_review
@@ -1254,6 +1382,7 @@ class PostgreSQLStoryStateRepository:
                 """
             ),
             {
+                "task_id": task_id,
                 "thread_id": state.thread.thread_id,
                 "chapter_id": state.chapter.chapter_id,
                 "status": state.validation.status.value,
@@ -1270,14 +1399,15 @@ class PostgreSQLStoryStateRepository:
         )
 
     def _insert_commit_log(self, conn, state: NovelAgentState) -> None:
+        task_id = state_task_id(state)
         conn.execute(
             text(
                 """
                 INSERT INTO commit_log (
-                    thread_id, commit_status, accepted_changes, rejected_changes, conflict_changes, reason
+                    task_id, thread_id, commit_status, accepted_changes, rejected_changes, conflict_changes, reason
                 )
                 VALUES (
-                    :thread_id, :commit_status,
+                    :task_id, :thread_id, :commit_status,
                     CAST(:accepted_changes AS JSONB),
                     CAST(:rejected_changes AS JSONB),
                     CAST(:conflict_changes AS JSONB),
@@ -1286,6 +1416,7 @@ class PostgreSQLStoryStateRepository:
                 """
             ),
             {
+                "task_id": task_id,
                 "thread_id": state.thread.thread_id,
                 "commit_status": state.commit.status.value,
                 "accepted_changes": self._dump_changes(state.commit.accepted_changes),
@@ -1298,20 +1429,22 @@ class PostgreSQLStoryStateRepository:
     def _insert_conflict_queue(self, conn, state: NovelAgentState) -> None:
         if not state.commit.conflict_changes:
             return
+        task_id = state_task_id(state)
         for change, record in zip(state.commit.conflict_changes, state.commit.conflict_records, strict=False):
             conn.execute(
                 text(
                     """
                     INSERT INTO conflict_queue (
-                        story_id, thread_id, change_id, update_type, proposed_change, reason, status
+                        task_id, story_id, thread_id, change_id, update_type, proposed_change, reason, status
                     )
                     VALUES (
-                        :story_id, :thread_id, :change_id, :update_type,
+                        :task_id, :story_id, :thread_id, :change_id, :update_type,
                         CAST(:proposed_change AS JSONB), :reason, :status
                     )
                     """
                 ),
                 {
+                    "task_id": task_id,
                     "story_id": state.story.story_id,
                     "thread_id": state.thread.thread_id,
                     "change_id": change.change_id,

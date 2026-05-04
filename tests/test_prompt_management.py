@@ -100,3 +100,19 @@ def test_prompt_metadata_can_be_extracted_from_messages():
     assert metadata["global_prompt_id"] == "global_default"
     assert metadata["task_prompt_id"] == "draft_generation"
     assert metadata["reasoning_mode"] == "internal"
+
+
+def test_draft_prompt_includes_continuity_anchor_pack():
+    state = NovelAgentState.demo("继续下一章。")
+    state.metadata["continuity_anchor_pack"] = {
+        "target_source_tail": "目标小说最后一段动作状态",
+        "accepted_continuation_tail": "上一份已采纳续写尾部",
+        "current_state": {"objective": "接住最后动作继续推进"},
+    }
+
+    messages = build_draft_messages(state)
+    user_content = messages[1]["content"]
+
+    assert "连续性锚点包" in user_content
+    assert "目标小说最后一段动作状态" in user_content
+    assert "接住最后动作继续推进" in user_content

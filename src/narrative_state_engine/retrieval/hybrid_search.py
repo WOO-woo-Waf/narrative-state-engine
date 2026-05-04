@@ -12,6 +12,7 @@ from narrative_state_engine.embedding.batcher import BatchEmbeddingProvider
 from narrative_state_engine.embedding.client import HTTPReranker
 from narrative_state_engine.retrieval.fusion import RetrievalCandidate, reciprocal_rank_fusion
 from narrative_state_engine.retrieval.query_planner import NarrativeQueryPlanner, RetrievalQueryPlan
+from narrative_state_engine.task_scope import normalize_task_id
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,7 @@ class HybridSearchService:
         *,
         story_id: str,
         query_text: str,
+        task_id: str = "",
         characters: list[str] | None = None,
         plot_threads: list[str] | None = None,
         evidence_types: list[str] | None = None,
@@ -72,6 +74,7 @@ class HybridSearchService:
         log_run: bool = False,
     ) -> HybridSearchResult:
         started = time.perf_counter()
+        task_id = normalize_task_id(task_id, story_id)
         plan = self.query_planner.plan(
             query_text=query_text,
             characters=characters,
@@ -79,10 +82,10 @@ class HybridSearchService:
             evidence_types=evidence_types,
         )
         ranked_lists: dict[str, list[RetrievalCandidate]] = {
-            "keyword": self._keyword_recall(story_id=story_id, plan=plan, limit=80),
-            "structured": self._structured_recall(story_id=story_id, plan=plan, limit=80),
+            "keyword": self._keyword_recall(task_id=task_id, story_id=story_id, plan=plan, limit=80),
+            "structured": self._structured_recall(task_id=task_id, story_id=story_id, plan=plan, limit=80),
         }
-        vector_candidates = self._vector_recall(story_id=story_id, plan=plan, limit=80)
+        vector_candidates = self._vector_recall(task_id=task_id, story_id=story_id, plan=plan, limit=80)
         if vector_candidates:
             ranked_lists["vector"] = vector_candidates
         fusion_pool_limit = max(limit, self.rerank_top_n * 3, 80)
@@ -105,12 +108,12 @@ class HybridSearchService:
         )
         if log_run:
             try:
-                self._log_run(story_id=story_id, query_text=query_text, result=result)
+                self._log_run(task_id=task_id, story_id=story_id, query_text=query_text, result=result)
             except Exception:
                 pass
         return result
 
-    def _keyword_recall(self, *, story_id: str, plan: RetrievalQueryPlan, limit: int) -> list[RetrievalCandidate]:
+    def _keyword_recall(self, *, task_id: str, story_id: str, plan: RetrievalQueryPlan, limit: int) -> list[RetrievalCandidate]:
         if not plan.keyword_terms:
             return []
         tsquery = " | ".join(term.replace("'", "''") for term in plan.keyword_terms[:16])
@@ -123,13 +126,15 @@ class HybridSearchService:
                                text, metadata, importance, recency,
                                ts_rank_cd(tsv, to_tsquery('simple', :tsquery)) AS score
                         FROM narrative_evidence_index
-                        WHERE story_id = :story_id
+                        WHERE task_id = :task_id
+                          AND story_id = :story_id
+                          AND canonical = TRUE
                           AND tsv @@ to_tsquery('simple', :tsquery)
                         ORDER BY score DESC, importance DESC, recency DESC
                         LIMIT :limit
                         """
                     ),
-                    {"story_id": story_id, "tsquery": tsquery, "limit": limit},
+                    {"task_id": task_id, "story_id": story_id, "tsquery": tsquery, "limit": limit},
                 ).mappings().all()
             except Exception:
                 rows = []
@@ -138,6 +143,7 @@ class HybridSearchService:
             return candidates[:limit]
         substring_candidates = self._keyword_substring_recall(
             story_id=story_id,
+            task_id=task_id,
             plan=plan,
             limit=max(limit - len(candidates), limit),
             exclude_ids={item.evidence_id for item in candidates},
@@ -148,6 +154,7 @@ class HybridSearchService:
         self,
         *,
         story_id: str,
+        task_id: str,
         plan: RetrievalQueryPlan,
         limit: int,
         exclude_ids: set[str] | None = None,
@@ -155,7 +162,7 @@ class HybridSearchService:
         terms = _keyword_substring_terms(plan.keyword_terms)
         if not terms:
             return []
-        params: dict[str, object] = {"story_id": story_id, "limit": limit}
+        params: dict[str, object] = {"task_id": task_id, "story_id": story_id, "limit": limit}
         predicates: list[str] = []
         score_parts: list[str] = []
         for index, term in enumerate(terms):
@@ -178,7 +185,9 @@ class HybridSearchService:
                            text, metadata, importance, recency,
                            ({score_sql}) + (importance * 0.15) + (recency * 0.05) AS score
                     FROM narrative_evidence_index
-                    WHERE story_id = :story_id
+                    WHERE task_id = :task_id
+                      AND story_id = :story_id
+                      AND canonical = TRUE
                       AND ({' OR '.join(predicates)})
                       {exclude_clause}
                     ORDER BY score DESC, importance DESC, recency DESC, updated_at DESC
@@ -189,8 +198,9 @@ class HybridSearchService:
             ).mappings().all()
         return [_candidate_from_row(row, score_key="keyword_substring") for row in rows]
 
-    def _structured_recall(self, *, story_id: str, plan: RetrievalQueryPlan, limit: int) -> list[RetrievalCandidate]:
+    def _structured_recall(self, *, task_id: str, story_id: str, plan: RetrievalQueryPlan, limit: int) -> list[RetrievalCandidate]:
         params = {
+            "task_id": task_id,
             "story_id": story_id,
             "types": plan.evidence_types,
             "entities": plan.entity_terms,
@@ -225,7 +235,9 @@ class HybridSearchService:
                                text, metadata, importance, recency,
                                (importance + recency) AS score
                         FROM narrative_evidence_index
-                        WHERE story_id = :story_id
+                        WHERE task_id = :task_id
+                          AND story_id = :story_id
+                          AND canonical = TRUE
                         {type_filter}
                         {entity_filter}
                         {keyword_filter}
@@ -243,7 +255,9 @@ class HybridSearchService:
                                text, metadata, importance, recency,
                                (importance + recency) AS score
                         FROM narrative_evidence_index
-                        WHERE story_id = :story_id
+                        WHERE task_id = :task_id
+                          AND story_id = :story_id
+                          AND canonical = TRUE
                         {type_filter}
                         {keyword_filter}
                         ORDER BY importance DESC, recency DESC, updated_at DESC
@@ -254,7 +268,7 @@ class HybridSearchService:
                 ).mappings().all()
         return [_candidate_from_row(row, score_key="structured") for row in rows]
 
-    def _vector_recall(self, *, story_id: str, plan: RetrievalQueryPlan, limit: int) -> list[RetrievalCandidate]:
+    def _vector_recall(self, *, task_id: str, story_id: str, plan: RetrievalQueryPlan, limit: int) -> list[RetrievalCandidate]:
         if self.embedding_provider is None:
             return []
         try:
@@ -267,6 +281,7 @@ class HybridSearchService:
             return []
         cast_type = "halfvec" if column_type == "halfvec" else "vector"
         params = {
+            "task_id": task_id,
             "story_id": story_id,
             "embedding": vector_literal,
             "limit": limit,
@@ -281,7 +296,9 @@ class HybridSearchService:
                            text, metadata, importance, recency,
                            1 - (embedding <=> CAST(:embedding AS {cast_type})) AS score
                     FROM narrative_evidence_index
-                    WHERE story_id = :story_id
+                    WHERE task_id = :task_id
+                      AND story_id = :story_id
+                      AND canonical = TRUE
                       AND embedding IS NOT NULL
                     {type_filter}
                     ORDER BY embedding <=> CAST(:embedding AS {cast_type})
@@ -337,21 +354,22 @@ class HybridSearchService:
             ).scalar()
         return str(row or "").lower()
 
-    def _log_run(self, *, story_id: str, query_text: str, result: HybridSearchResult) -> None:
+    def _log_run(self, *, task_id: str, story_id: str, query_text: str, result: HybridSearchResult) -> None:
         with self.engine.begin() as conn:
             conn.execute(
                 text(
                     """
                     INSERT INTO retrieval_runs (
-                        story_id, query_text, query_plan, candidate_counts, selected_evidence, latency_ms
+                        task_id, story_id, query_text, query_plan, candidate_counts, selected_evidence, latency_ms
                     )
                     VALUES (
-                        :story_id, :query_text, CAST(:query_plan AS JSONB),
+                        :task_id, :story_id, :query_text, CAST(:query_plan AS JSONB),
                         CAST(:candidate_counts AS JSONB), CAST(:selected_evidence AS JSONB), :latency_ms
                     )
                     """
                 ),
                 {
+                    "task_id": task_id,
                     "story_id": story_id,
                     "query_text": query_text,
                     "query_plan": json.dumps(result.query_plan.__dict__, ensure_ascii=False),

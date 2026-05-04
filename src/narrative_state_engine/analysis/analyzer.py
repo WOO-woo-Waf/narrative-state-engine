@@ -6,11 +6,13 @@ from datetime import datetime, timezone
 from typing import Iterable
 
 from narrative_state_engine.analysis.chunker import TextChunker
+from narrative_state_engine.analysis.merging import StoryBibleMerger, StyleProfileAggregator
 from narrative_state_engine.analysis.models import (
     AnalysisRunResult,
     ChapterAnalysisState,
     CharacterCardAsset,
     ChunkAnalysisState,
+    ConceptSystemAsset,
     EventStyleCaseAsset,
     GlobalStoryAnalysisState,
     PlotThreadAsset,
@@ -30,15 +32,35 @@ _SCENE_MARKER_RE = re.compile(r"(?:\n\s*\n|场景|次日|当夜|与此同时|另
 _DIALOGUE_RE = re.compile(r"[“\"].*?[”\"]")
 
 
+def _setting_bucket_for_type(concept_type: str) -> str:
+    return {
+        "world_concept": "world_concepts",
+        "power_system": "power_systems",
+        "system_rank": "system_ranks",
+        "technique": "techniques",
+        "resource": "resource_concepts",
+        "rule_mechanism": "rule_mechanisms",
+        "terminology": "terminology",
+    }.get(concept_type, "world_concepts")
+
+
+def _first_marker(text: str, markers: tuple[str, ...]) -> str:
+    for marker in markers:
+        if marker in text:
+            return marker
+    return ""
+
+
 class NovelTextAnalyzer:
     def __init__(
         self,
         *,
         max_chunk_chars: int = 1800,
+        overlap_chars: int = 240,
         max_snippets: int = 600,
         max_event_cases: int = 120,
     ) -> None:
-        self.chunker = TextChunker(max_chunk_chars=max_chunk_chars)
+        self.chunker = TextChunker(max_chunk_chars=max_chunk_chars, overlap_chars=overlap_chars)
         self.max_snippets = max_snippets
         self.max_event_cases = max_event_cases
 
@@ -253,12 +275,17 @@ class NovelTextAnalyzer:
         chunk_states: list[ChunkAnalysisState],
     ) -> StoryBibleAsset:
         sentences = self._split_sentences(source_text)
-        return StoryBibleAsset(
+        bible = StoryBibleAsset(
             character_cards=self._build_character_cards(source_text, snippet_bank, chunk_states),
             plot_threads=self._build_plot_threads(chunk_states),
             world_rules=self._build_world_rules(sentences, snippet_bank, chunk_states),
-            style_profile=self._build_style_profile(sentences, snippet_bank),
+            **self._build_setting_system_assets(sentences),
+            style_profile=StyleProfileAggregator().aggregate(
+                snippet_bank,
+                base=self._build_style_profile(sentences, snippet_bank),
+            ),
         )
+        return StoryBibleMerger().merge(bible, chunk_states=chunk_states)
 
     def _build_character_cards(
         self,
@@ -275,6 +302,8 @@ class NovelTextAnalyzer:
         if not mention_counts:
             mention_counts.update(self._top_character_tokens(source_text, limit=6))
         candidate_names = [name for name, _ in mention_counts.most_common(8)]
+        setting_terms = self._setting_term_blacklist(source_text)
+        candidate_names = [name for name in candidate_names if name not in setting_terms]
         if not candidate_names:
             candidate_names = ["protagonist"]
 
@@ -287,11 +316,23 @@ class NovelTextAnalyzer:
                 CharacterCardAsset(
                     character_id=f"char-{idx:03d}",
                     name=name,
+                    aliases=[],
+                    role_type="candidate",
+                    identity_tags=[name],
                     appearance_profile=[item.text[:80] for item in appearance_snippets[:3]],
+                    stable_traits=["dialogue_driven"] if dialogue_snippets else ["narration_driven"],
+                    current_goals=[],
+                    knowledge_boundary=[],
                     voice_profile=["dialogue_driven"] if dialogue_snippets else ["narration_driven"],
                     gesture_patterns=[item.text[:80] for item in action_snippets[:3]],
                     dialogue_patterns=[item.text[:80] for item in dialogue_snippets[:3]],
+                    dialogue_do=[item.text[:80] for item in dialogue_snippets[:2]],
+                    decision_patterns=[item.text[:80] for item in action_snippets[:2]],
                     state_transitions=[f"mentioned_in_{state.chunk_id}" for state in chunk_states if name in state.character_mentions][:6],
+                    confidence=min(max(0.55 + 0.08 * mention_counts.get(name, 1), 0.55), 0.95),
+                    status="confirmed" if mention_counts.get(name, 0) >= 2 else "candidate",
+                    source_type="analysis",
+                    updated_by="analysis",
                 )
             )
         return cards
@@ -323,6 +364,94 @@ class NovelTextAnalyzer:
                 )
             )
         return rules
+
+    def _build_setting_system_assets(self, sentences: list[str]) -> dict[str, list[ConceptSystemAsset]]:
+        buckets: dict[str, list[ConceptSystemAsset]] = {
+            "world_concepts": [],
+            "power_systems": [],
+            "system_ranks": [],
+            "techniques": [],
+            "resource_concepts": [],
+            "rule_mechanisms": [],
+            "terminology": [],
+        }
+        seen: set[tuple[str, str]] = set()
+        for sentence in sentences:
+            for concept_type, name in self._extract_setting_terms(sentence):
+                key = (concept_type, name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                bucket = _setting_bucket_for_type(concept_type)
+                buckets[bucket].append(
+                    ConceptSystemAsset(
+                        concept_id=f"{concept_type}-{len(buckets[bucket]) + 1:03d}",
+                        name=name,
+                        concept_type=concept_type,
+                        definition=self._trim_sentence(sentence, 180),
+                        rules=[self._trim_sentence(sentence, 160)] if self._looks_like_rule(sentence) else [],
+                        limitations=[self._trim_sentence(sentence, 160)] if self._looks_like_limitation(sentence) else [],
+                        confidence=0.68 if concept_type == "terminology" else 0.76,
+                        status="candidate",
+                    )
+                )
+        return buckets
+
+    def _extract_setting_terms(self, sentence: str) -> list[tuple[str, str]]:
+        text = str(sentence or "")
+        terms: list[tuple[str, str]] = []
+        power_markers = ("修炼体系", "修行体系", "灵力体系", "魔法体系", "异能体系", "科技体系", "职业体系", "能力体系")
+        if any(marker in text for marker in power_markers):
+            terms.append(("power_system", _first_marker(text, power_markers) or "能力体系"))
+
+        rank_matches = [
+            match.group(1).lstrip("为和及与到至")
+            for match in re.finditer(r"(?:^|[，,、和为分\s])([\u4e00-\u9fffA-Za-z0-9_]{1,6}?(?:境|阶|级|品|段|层))", text)
+        ]
+        rank_stop = {"这个", "那个", "已经", "不能", "必须", "等级", "阶段"}
+        for name in rank_matches[:8]:
+            if name not in rank_stop:
+                terms.append(("system_rank", name))
+
+        technique_matches = re.findall(r"[\u4e00-\u9fffA-Za-z0-9_]{1,16}?(?:功法|法术|秘术|剑诀|招式|技能|术法|神通|剑术|术)", text)
+        for name in technique_matches[:6]:
+            terms.append(("technique", name))
+
+        resource_matches = re.findall(r"[\u4e00-\u9fffA-Za-z0-9_]{0,16}?(?:灵石|丹药|丹|材料|晶核|货币|能量|符箓|法器|灵草)", text)
+        for name in resource_matches[:6]:
+            terms.append(("resource", name))
+
+        mechanism_markers = ("突破", "反噬", "代价", "限制", "契约", "规则", "禁忌", "条件")
+        for marker in mechanism_markers:
+            if marker in text:
+                terms.append(("rule_mechanism", marker))
+
+        concept_matches = re.findall(r"[\u4e00-\u9fffA-Za-z0-9_]{1,16}(?:灵根|命格|污染值|契约|血脉|道心|识海|丹田|领域)", text)
+        for name in concept_matches[:6]:
+            terms.append(("world_concept", name))
+
+        quoted_terms = re.findall(r"[《「『“\"]([^》」』”\"]{2,16})[》」』”\"]", text)
+        for name in quoted_terms[:4]:
+            if not any(name == existing_name for _, existing_name in terms):
+                terms.append(("terminology", name))
+        return self._dedupe_setting_terms(terms)
+
+    def _dedupe_setting_terms(self, terms: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        seen: set[tuple[str, str]] = set()
+        out: list[tuple[str, str]] = []
+        for concept_type, raw_name in terms:
+            name = str(raw_name).strip(" ，,。；;：:")
+            if not name or len(name) > 20:
+                continue
+            key = (concept_type, name)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(key)
+        return out
+
+    def _setting_term_blacklist(self, text: str) -> set[str]:
+        return {name for _, name in self._extract_setting_terms(text)}
 
     def _build_plot_threads(self, chunk_states: list[ChunkAnalysisState]) -> list[PlotThreadAsset]:
         anchors = self._unique_keep_order(
@@ -377,6 +506,10 @@ class NovelTextAnalyzer:
                 "medium": round(len([x for x in lengths if 20 < x <= 60]) / total, 4),
                 "long": round(len([x for x in lengths if x > 60]) / total, 4),
             },
+            paragraph_length_distribution={
+                "single_sentence": round(len([s for s in sentences if len(s) <= 40]) / total, 4),
+                "dense": round(len([s for s in sentences if len(s) > 60]) / total, 4),
+            },
             description_mix={
                 "action": round(type_counter.get(SnippetType.ACTION.value, 0) / mix_total, 4),
                 "expression": round(type_counter.get(SnippetType.EXPRESSION.value, 0) / mix_total, 4),
@@ -385,6 +518,7 @@ class NovelTextAnalyzer:
                 "dialogue": round(type_counter.get(SnippetType.DIALOGUE.value, 0) / mix_total, 4),
                 "inner_monologue": round(type_counter.get(SnippetType.INNER_MONOLOGUE.value, 0) / mix_total, 4),
             },
+            dialogue_ratio=round(type_counter.get(SnippetType.DIALOGUE.value, 0) / mix_total, 4),
             dialogue_signature={
                 "dialogue_ratio": round(type_counter.get(SnippetType.DIALOGUE.value, 0) / mix_total, 4),
                 "avg_dialogue_sentence_length": self._avg_dialogue_length(snippet_bank),
@@ -516,6 +650,15 @@ class NovelTextAnalyzer:
             character_registry=[item.model_dump(mode="json") for item in story_bible.character_cards],
             plot_threads=[item.model_dump(mode="json") for item in story_bible.plot_threads],
             world_rules=[item.model_dump(mode="json") for item in story_bible.world_rules],
+            setting_systems={
+                "world_concepts": [item.model_dump(mode="json") for item in story_bible.world_concepts],
+                "power_systems": [item.model_dump(mode="json") for item in story_bible.power_systems],
+                "system_ranks": [item.model_dump(mode="json") for item in story_bible.system_ranks],
+                "techniques": [item.model_dump(mode="json") for item in story_bible.techniques],
+                "resource_concepts": [item.model_dump(mode="json") for item in story_bible.resource_concepts],
+                "rule_mechanisms": [item.model_dump(mode="json") for item in story_bible.rule_mechanisms],
+                "terminology": [item.model_dump(mode="json") for item in story_bible.terminology],
+            },
             timeline_state={
                 "chapter_order": [state.chapter_index for state in chapter_states],
                 "last_chapter_index": chapter_states[-1].chapter_index if chapter_states else 0,
@@ -594,6 +737,9 @@ class NovelTextAnalyzer:
 
     def _looks_like_rule(self, sentence: str) -> bool:
         return any(token in sentence for token in ("必须", "不能", "不会", "禁止", "约定", "规则", "誓言"))
+
+    def _looks_like_limitation(self, sentence: str) -> bool:
+        return any(token in sentence for token in ("不能", "不得", "不可", "代价", "反噬", "限制", "禁忌"))
 
     def _is_hard_rule(self, sentence: str) -> bool:
         return any(token in sentence for token in ("必须", "不能", "禁止"))

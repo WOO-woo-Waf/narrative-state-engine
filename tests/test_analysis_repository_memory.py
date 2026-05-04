@@ -1,5 +1,7 @@
+import inspect
+
 from narrative_state_engine.analysis import NovelTextAnalyzer
-from narrative_state_engine.storage.repository import InMemoryStoryStateRepository
+from narrative_state_engine.storage.repository import InMemoryStoryStateRepository, PostgreSQLStoryStateRepository
 
 
 def test_inmemory_repository_persists_analysis_assets():
@@ -34,3 +36,11 @@ def test_inmemory_repository_persists_analysis_assets():
         for row in repo.analysis_evidence["story-memory-001"]
     }.intersection({"chapter_summary", "character_card", "plot_thread", "world_rule", "style_snippet"})
     assert all(row["metadata"].get("source_type") for row in repo.analysis_evidence["story-memory-001"])
+
+
+def test_repository_evidence_loaders_accept_task_scope():
+    style_signature = inspect.signature(PostgreSQLStoryStateRepository.load_style_snippets)
+    event_signature = inspect.signature(PostgreSQLStoryStateRepository.load_event_style_cases)
+
+    assert "task_id" in style_signature.parameters
+    assert "task_id" in event_signature.parameters

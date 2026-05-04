@@ -9,6 +9,7 @@ from sqlalchemy.engine import Engine
 
 from narrative_state_engine.ingestion.chunker import chunk_chapter
 from narrative_state_engine.models import NovelAgentState
+from narrative_state_engine.task_scope import scoped_storage_id, state_task_id
 
 
 @dataclass(frozen=True)
@@ -31,16 +32,22 @@ class GeneratedContentIndexer:
         state: NovelAgentState,
         *,
         source_type: str = "generated_continuation",
+        content: str | None = None,
+        branch_id: str = "",
+        branch_status: str = "accepted",
+        canonical: bool = True,
+        output_path: str = "",
         target_chars: int = 1000,
         overlap_chars: int = 160,
     ) -> GeneratedIndexResult | None:
-        content = (state.draft.content or "").strip()
-        if not content:
+        content_value = (content if content is not None else state.draft.content or "").strip()
+        if not content_value:
             return None
         story_id = state.story.story_id
-        text_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-        request_token = state.thread.request_id or state.thread.thread_id or text_hash[:12]
-        document_id = f"gen:{story_id}:{request_token}:{text_hash[:12]}"
+        task_id = state_task_id(state)
+        text_hash = hashlib.sha256(content_value.encode("utf-8")).hexdigest()
+        request_token = branch_id or state.thread.request_id or state.thread.thread_id or text_hash[:12]
+        document_id = scoped_storage_id("gen", task_id, story_id, request_token, text_hash[:12])
         chapter_index = int(state.chapter.chapter_number or 0)
         chapter_id = f"{document_id}:ch{chapter_index:05d}"
         chapter_title = (
@@ -49,7 +56,7 @@ class GeneratedContentIndexer:
             or f"Generated Chapter {chapter_index}"
         )
         chunks = chunk_chapter(
-            content,
+            content_value,
             chapter_start_offset=0,
             target_chars=target_chars,
             overlap_chars=overlap_chars,
@@ -76,13 +83,32 @@ class GeneratedContentIndexer:
             conn.execute(
                 text(
                     """
+                    INSERT INTO task_runs (task_id, story_id, title, description, status, metadata, updated_at)
+                    VALUES (:task_id, :story_id, :title, 'Generated continuation task', 'active', CAST(:metadata AS JSONB), NOW())
+                    ON CONFLICT (task_id) DO UPDATE
+                    SET story_id = EXCLUDED.story_id,
+                        title = COALESCE(NULLIF(EXCLUDED.title, ''), task_runs.title),
+                        metadata = task_runs.metadata || EXCLUDED.metadata,
+                        updated_at = NOW()
+                    """
+                ),
+                {
+                    "task_id": task_id,
+                    "story_id": story_id,
+                    "title": state.story.title or story_id,
+                    "metadata": json.dumps({"last_action": "index_generated", "branch_id": branch_id}, ensure_ascii=False),
+                },
+            )
+            conn.execute(
+                text(
+                    """
                     DELETE FROM narrative_evidence_index
-                    WHERE story_id = :story_id
+                    WHERE task_id = :task_id AND story_id = :story_id
                       AND source_table IN ('source_chunks', 'source_chapters')
                       AND metadata->>'document_id' = :document_id
                     """
                 ),
-                {"story_id": story_id, "document_id": document_id},
+                {"task_id": task_id, "story_id": story_id, "document_id": document_id},
             )
             conn.execute(text("DELETE FROM source_chunks WHERE document_id = :document_id"), {"document_id": document_id})
             conn.execute(text("DELETE FROM source_chapters WHERE document_id = :document_id"), {"document_id": document_id})
@@ -90,16 +116,17 @@ class GeneratedContentIndexer:
                 text(
                     """
                     INSERT INTO source_documents (
-                        document_id, story_id, title, author, source_type,
+                        document_id, task_id, story_id, title, author, source_type,
                         file_path, text_hash, total_chars, metadata
                     )
                     VALUES (
-                        :document_id, :story_id, :title, 'generated', :source_type,
-                        '', :text_hash, :total_chars, CAST(:metadata AS JSONB)
+                        :document_id, :task_id, :story_id, :title, 'generated', :source_type,
+                        :file_path, :text_hash, :total_chars, CAST(:metadata AS JSONB)
                     )
                     ON CONFLICT (document_id) DO UPDATE
                     SET title = EXCLUDED.title,
                         source_type = EXCLUDED.source_type,
+                        file_path = EXCLUDED.file_path,
                         text_hash = EXCLUDED.text_hash,
                         total_chars = EXCLUDED.total_chars,
                         metadata = EXCLUDED.metadata
@@ -107,18 +134,24 @@ class GeneratedContentIndexer:
                 ),
                 {
                     "document_id": document_id,
+                    "task_id": task_id,
                     "story_id": story_id,
                     "title": chapter_title,
                     "source_type": source_type,
+                    "file_path": output_path,
                     "text_hash": text_hash,
-                    "total_chars": len(content),
+                    "total_chars": len(content_value),
                     "metadata": json.dumps(
                         {
                             "generated": True,
+                            "accepted": bool(canonical),
+                            "branch_id": branch_id,
+                            "branch_status": branch_status,
                             "thread_id": state.thread.thread_id,
                             "request_id": state.thread.request_id,
                             "commit_status": state.commit.status.value,
                             "chapter_number": chapter_index,
+                            "task_id": task_id,
                         },
                         ensure_ascii=False,
                     ),
@@ -128,11 +161,11 @@ class GeneratedContentIndexer:
                 text(
                     """
                     INSERT INTO source_chapters (
-                        chapter_id, document_id, story_id, chapter_index, title,
+                        chapter_id, document_id, task_id, story_id, chapter_index, title,
                         start_offset, end_offset, summary, synopsis
                     )
                     VALUES (
-                        :chapter_id, :document_id, :story_id, :chapter_index, :title,
+                        :chapter_id, :document_id, :task_id, :story_id, :chapter_index, :title,
                         0, :end_offset, :summary, :synopsis
                     )
                     ON CONFLICT (chapter_id) DO UPDATE
@@ -145,10 +178,11 @@ class GeneratedContentIndexer:
                 {
                     "chapter_id": chapter_id,
                     "document_id": document_id,
+                    "task_id": task_id,
                     "story_id": story_id,
                     "chapter_index": chapter_index,
                     "title": chapter_title,
-                    "end_offset": len(content),
+                    "end_offset": len(content_value),
                     "summary": state.chapter.latest_summary or state.draft.planned_beat or "",
                     "synopsis": state.draft.rationale or "",
                 },
@@ -163,7 +197,11 @@ class GeneratedContentIndexer:
                     "title": chapter_title,
                     "source_type": source_type,
                     "generated": True,
+                    "accepted": bool(canonical),
+                    "branch_id": branch_id,
+                    "branch_status": branch_status,
                     "request_id": state.thread.request_id,
+                    "task_id": task_id,
                     "start_offset": chunk.start_offset,
                     "end_offset": chunk.end_offset,
                 }
@@ -171,12 +209,12 @@ class GeneratedContentIndexer:
                     text(
                         """
                         INSERT INTO source_chunks (
-                            chunk_id, document_id, chapter_id, story_id, chapter_index, chunk_index,
+                            chunk_id, document_id, chapter_id, task_id, story_id, chapter_index, chunk_index,
                             start_offset, end_offset, text, chunk_type, token_estimate,
                             metadata, tsv, embedding_status
                         )
                         VALUES (
-                            :chunk_id, :document_id, :chapter_id, :story_id, :chapter_index, :chunk_index,
+                            :chunk_id, :document_id, :chapter_id, :task_id, :story_id, :chapter_index, :chunk_index,
                             :start_offset, :end_offset, :chunk_text, :chunk_type, :token_estimate,
                             CAST(:metadata AS JSONB), to_tsvector('simple', :chunk_text), 'pending'
                         )
@@ -197,6 +235,7 @@ class GeneratedContentIndexer:
                         "chunk_id": chunk_id,
                         "document_id": document_id,
                         "chapter_id": chapter_id,
+                        "task_id": task_id,
                         "story_id": story_id,
                         "chapter_index": chapter_index,
                         "chunk_index": chunk.chunk_index,
@@ -212,13 +251,13 @@ class GeneratedContentIndexer:
                     text(
                         """
                         INSERT INTO narrative_evidence_index (
-                            evidence_id, story_id, evidence_type, source_table, source_id,
+                            evidence_id, task_id, story_id, evidence_type, source_table, source_id,
                             chapter_index, text, tags, canonical, importance, recency,
                             tsv, metadata, embedding_status
                         )
                         VALUES (
-                            :evidence_id, :story_id, 'generated_chunk', 'source_chunks', :source_id,
-                            :chapter_index, :chunk_text, CAST(:tags AS JSONB), TRUE, 0.9, 1.0,
+                            :evidence_id, :task_id, :story_id, 'generated_chunk', 'source_chunks', :source_id,
+                            :chapter_index, :chunk_text, CAST(:tags AS JSONB), :canonical, 0.9, 1.0,
                             to_tsvector('simple', :chunk_text), CAST(:metadata AS JSONB), 'pending'
                         )
                         ON CONFLICT (evidence_id) DO UPDATE
@@ -237,13 +276,15 @@ class GeneratedContentIndexer:
                         """
                     ),
                     {
-                        "evidence_id": f"gen:{chunk_id}",
+                        "evidence_id": scoped_storage_id("gen", task_id, chunk_id),
+                        "task_id": task_id,
                         "story_id": story_id,
                         "source_id": chunk_id,
                         "chapter_index": chapter_index,
                         "chunk_text": chunk.text,
                         "tags": json.dumps([source_type, "generated", "continuation"], ensure_ascii=False),
                         "metadata": json.dumps(metadata, ensure_ascii=False),
+                        "canonical": bool(canonical),
                     },
                 )
 

@@ -216,11 +216,12 @@
 
     async function renderCurrent() {
       const tab = state.tab;
-      if (tab === "overview") return renderOverview(await api(`/api/stories/${storyId()}/overview`));
-      if (tab === "analysis") return renderAnalysis(await api(`/api/stories/${storyId()}/analysis`));
-      if (tab === "author") return renderAuthor(await api(`/api/stories/${storyId()}/author-plan`));
-      if (tab === "generated") return renderGenerated(await api(`/api/stories/${storyId()}/generated`));
-      if (tab === "retrieval") return renderRetrieval(await api(`/api/stories/${storyId()}/retrieval`));
+      const taskQuery = `task_id=${encodeURIComponent(taskId())}`;
+      if (tab === "overview") return renderOverview(await api(`/api/stories/${storyId()}/overview?${taskQuery}`));
+      if (tab === "analysis") return renderAnalysis(await api(`/api/stories/${storyId()}/analysis?${taskQuery}`));
+      if (tab === "author") return renderAuthor(await api(`/api/stories/${storyId()}/author-plan?${taskQuery}`));
+      if (tab === "generated") return renderGenerated(await api(`/api/stories/${storyId()}/generated?${taskQuery}`));
+      if (tab === "retrieval") return renderRetrieval(await api(`/api/stories/${storyId()}/retrieval?${taskQuery}`));
       if (tab === "jobs") return renderJobs();
     }
 
@@ -279,7 +280,8 @@
           <div class="panel"><h2>数据库生成记录</h2><div class="metric">${esc((data.database_documents || []).length)}</div></div>
         </div>
         <div class="panel" style="margin-top:12px"><h2>输出章节文件</h2><div class="list">${(data.output_files || []).map(f => `<div class="item"><b>${esc(f.name)}</b><span class="pill">${esc(f.chars)} 字符</span><div class="chapter-text">${esc(f.content)}</div></div>`).join("") || '<div class="muted">novels_output 下暂无 txt 输出</div>'}</div></div>
-        <div class="panel" style="margin-top:12px"><h2>数据库 generated_continuation</h2><div class="list">${(data.database_documents || []).map(d => `<div class="item"><b>${esc(d.title)}</b><span class="pill">${esc(d.total_chars)} 字符</span><p class="muted">${esc(d.created_at)} ${esc(d.file_path)}</p></div>`).join("") || '<div class="muted">暂无数据库生成记录</div>'}</div></div>
+        <div class="panel" style="margin-top:12px"><h2>续写分支</h2><div class="list">${(data.branches || []).map(b => `<div class="item"><b>${esc(b.branch_id)}</b><span class="pill ${b.status === "accepted" ? "ok" : b.status === "rejected" ? "bad" : "warn"}">${esc(b.status)}</span><span class="pill">${esc(b.chars)} 字符</span><p class="muted">base=v${esc(b.base_state_version_no || "")} parent=${esc(b.parent_branch_id || "")} ${esc(b.output_path || "")}</p><p>${esc(b.preview || "")}</p></div>`).join("") || '<div class="muted">暂无续写分支</div>'}</div></div>
+        <div class="panel" style="margin-top:12px"><h2>数据库 generated_continuation</h2><div class="list">${(data.database_documents || []).map(d => `<div class="item"><b>${esc(d.title)}</b><span class="pill">${esc(d.total_chars)} 字符</span><span class="pill">${esc(d.metadata?.branch_status || "mainline")}</span><p class="muted">${esc(d.created_at)} ${esc(d.file_path)}</p></div>`).join("") || '<div class="muted">暂无数据库生成记录</div>'}</div></div>
         ${raw(data)}
       `;
     }
@@ -292,10 +294,22 @@
 
     async function renderJobs() {
       const jobs = await api("/api/jobs");
+      const tasks = await api("/api/tasks");
       $("jobs").innerHTML = `
+        <div class="panel"><h2>Task 管理</h2><div class="list">${(tasks.tasks || []).map(t => `<div class="item"><b>${esc(t.task_id)}</b><span class="pill">${esc(t.story_id)}</span><span class="pill">${esc(t.status || "active")}</span><p>${esc(t.title || "")}</p><p class="muted">${esc(t.updated_at || "")}</p><button class="secondary" data-use-task="${esc(t.task_id)}" data-use-story="${esc(t.story_id)}">切换</button></div>`).join("") || '<div class="muted">暂无 task_runs 记录</div>'}</div></div>
         <div class="panel"><h2>运行任务</h2>${jobForm()}</div>
         <div class="panel" style="margin-top:12px"><h2>任务日志</h2><div class="list">${(jobs.jobs || []).map(j => `<div class="item"><b>${esc(j.task)}</b><span class="pill ${j.status === "succeeded" ? "ok" : j.status === "failed" ? "bad" : "warn"}">${esc(j.status)}</span><p class="muted">${esc(j.created_at)} exit=${esc(j.exit_code ?? "")}</p><pre>${esc((j.stdout || "") + (j.stderr ? "\n[stderr]\n" + j.stderr : "") + (j.error ? "\n[error]\n" + j.error : ""))}</pre>${raw(j.command)}</div>`).join("") || '<div class="muted">暂无任务</div>'}</div></div>
       `;
+      document.querySelectorAll("[data-use-task]").forEach(btn => {
+        btn.onclick = async () => {
+          $("taskId").value = btn.dataset.useTask || taskId();
+          $("storyId").value = btn.dataset.useStory || storyId();
+          state.tab = "overview";
+          document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x.dataset.tab === "overview"));
+          document.querySelectorAll(".view").forEach(view => view.classList.toggle("hidden", view.id !== state.tab));
+          await renderCurrent();
+        };
+      });
       $("runJob").onclick = submitJob;
       $("taskSelect").onchange = updateTaskHints;
       updateTaskHints();
@@ -308,6 +322,11 @@
             <option value="search-debug">search-debug</option>
             <option value="generate-chapter">generate-chapter</option>
             <option value="author-session">author-session</option>
+            <option value="edit-state">edit-state</option>
+            <option value="create-state">create-state</option>
+            <option value="branch-status">branch-status</option>
+            <option value="accept-branch">accept-branch</option>
+            <option value="reject-branch">reject-branch</option>
             <option value="analyze-task">analyze-task</option>
             <option value="ingest-txt">ingest-txt</option>
             <option value="backfill-embeddings">backfill-embeddings</option>
@@ -319,6 +338,8 @@
           <label>source_type<input id="jobSourceType" value="target_continuation"></label>
           <label>limit / rounds<input id="jobLimit" value="8"></label>
           <label>min_chars<input id="jobMinChars" value="800"></label>
+          <label>branch_id<input id="jobBranchId" value=""></label>
+          <label>branch_mode<select id="jobBranchMode"><option value="draft">draft</option><option value="mainline">mainline</option></select></label>
           <label>persist<select id="jobPersist"><option value="false">false</option><option value="true">true</option></select></label>
           <label>LLM<select id="jobLlm"><option value="true">true</option><option value="false">false</option></select></label>
           <label>RAG<select id="jobRag"><option value="true">true</option><option value="false">false</option></select></label>
@@ -335,6 +356,8 @@
         "search-debug": "使用 Prompt/Seed/Query 作为检索 query，默认不启动远程服务。",
         "generate-chapter": "使用 Prompt/Seed/Query 作为续写 prompt，默认 --no-persist，输出到 novels_output。",
         "author-session": "使用 Prompt/Seed/Query 作为作者规划 seed。",
+        "edit-state": "使用 Prompt/Seed/Query 作为自然语言状态编辑，勾选 persist 和 confirm 后保存。",
+        "create-state": "使用 Prompt/Seed/Query 从零创建初始小说状态。",
         "analyze-task": "分析输入文件，可选择 LLM 和 persist。",
         "ingest-txt": "导入输入文件到数据库。",
         "backfill-embeddings": "补齐 story 下证据向量，不启动或停止远程服务。"
@@ -355,10 +378,16 @@
         query: text,
         seed: text,
         prompt: text,
+        author_input: text,
+        description: text,
+        confirm: task === "edit-state",
         objective: $("jobObjective").value,
         limit,
         rounds: Math.max(1, limit),
         min_chars: Number($("jobMinChars").value || 800),
+        branch_id: $("jobBranchId").value,
+        branch_mode: $("jobBranchMode").value,
+        continue_from_branch: $("jobBranchId").value,
         min_paragraphs: 3,
         concurrency: 3,
         retrieval_limit: 12,

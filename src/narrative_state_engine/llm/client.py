@@ -29,6 +29,8 @@ class NovelLLMConfig:
     presence_penalty: float = 0.0
     frequency_penalty: float = 0.0
     timeout_s: float = 120.0
+    deepseek_thinking: str = "auto"
+    reasoning_effort: str = "high"
 
     @classmethod
     def from_env(cls) -> "NovelLLMConfig":
@@ -54,6 +56,8 @@ class NovelLLMConfig:
             presence_penalty=_float("NOVEL_AGENT_LLM_PRESENCE_PENALTY", "0"),
             frequency_penalty=_float("NOVEL_AGENT_LLM_FREQUENCY_PENALTY", "0"),
             timeout_s=_float("NOVEL_AGENT_LLM_TIMEOUT_S", "120"),
+            deepseek_thinking=os.getenv("NOVEL_AGENT_DEEPSEEK_THINKING", "auto").strip() or "auto",
+            reasoning_effort=os.getenv("NOVEL_AGENT_DEEPSEEK_REASONING_EFFORT", "high").strip() or "high",
         )
 
 
@@ -86,6 +90,7 @@ class OpenAITextLLM(BaseLLM):
         tool_choice = kwargs.pop("tool_choice", None)
         json_mode = kwargs.pop("json_mode", False)
         thinking_mode = kwargs.pop("thinking_mode", None)
+        extra_body = kwargs.pop("extra_body", None)
 
         request_kwargs = dict(kwargs)
         if tools:
@@ -95,7 +100,11 @@ class OpenAITextLLM(BaseLLM):
         if json_mode:
             request_kwargs["response_format"] = {"type": "json_object"}
         if thinking_mode:
-            request_kwargs["thinking"] = thinking_mode
+            body = dict(extra_body or {})
+            body["thinking"] = thinking_mode
+            request_kwargs["extra_body"] = body
+        elif extra_body:
+            request_kwargs["extra_body"] = extra_body
 
         resolved_stream = resolve_stream_flag(stream=stream, tools=tools)
         if resolved_stream:
@@ -178,6 +187,12 @@ def unified_text_llm(messages: list[dict[str, Any]], **kwargs: Any) -> Any:
 
     endpoints = _resolve_endpoints(config=config, kwargs=kwargs)
     model_name = kwargs.pop("model_name", None) or config.model_name
+    if _deepseek_thinking_enabled(config=config, model_name=model_name):
+        kwargs.setdefault("thinking_mode", {"type": "enabled"})
+        if config.reasoning_effort:
+            kwargs.setdefault("reasoning_effort", config.reasoning_effort)
+        for unsupported in ["temperature", "top_p", "presence_penalty", "frequency_penalty"]:
+            kwargs.pop(unsupported, None)
     max_attempts = int(kwargs.pop("max_attempts", 3) or 3)
     base_backoff_s = float(kwargs.pop("base_backoff_s", 0.6) or 0.6)
     purpose = kwargs.pop("purpose", None)
@@ -428,6 +443,15 @@ def _split_multi(raw: str) -> list[str]:
     return parts
 
 
+def _deepseek_thinking_enabled(*, config: NovelLLMConfig, model_name: str) -> bool:
+    mode = (config.deepseek_thinking or "auto").strip().lower()
+    if mode in {"0", "false", "off", "disabled", "disable", "none", "no"}:
+        return False
+    if mode in {"1", "true", "on", "enabled", "enable", "yes"}:
+        return True
+    return (model_name or "").strip().lower().startswith("deepseek-v4")
+
+
 def _normalize_str_list(value: Any) -> list[str]:
     if value is None:
         return []
@@ -451,6 +475,8 @@ def _build_interaction_options(*, request_kwargs: dict[str, Any], model_name: st
         "stream",
         "timeout",
         "tool_choice",
+        "thinking_mode",
+        "reasoning_effort",
     ]:
         if key in request_kwargs:
             options[key] = request_kwargs.get(key)

@@ -29,12 +29,28 @@ def build_chunk_analysis_messages(
         "characters": [
             {
                 "name": "string",
+                "aliases": ["string"],
                 "role": "string",
+                "identity_tags": ["string"],
+                "appearance_profile": ["string"],
+                "stable_traits": ["string"],
+                "wounds_or_fears": ["string"],
                 "goal": "string",
+                "hidden_goals": ["string"],
+                "moral_boundaries": ["string"],
                 "emotion": "string",
                 "knowledge": ["string"],
                 "actions": ["string"],
+                "voice_profile": ["string"],
+                "dialogue_do": ["string"],
+                "dialogue_do_not": ["string"],
+                "decision_patterns": ["string"],
+                "source_span_ids": ["string"],
+                "confidence": 0.0,
             }
+        ],
+        "candidate_character_mentions": [
+            {"name": "string", "reason": "string", "evidence": "string", "confidence": 0.0}
         ],
         "events": [
             {
@@ -46,6 +62,18 @@ def build_chunk_analysis_messages(
         ],
         "relationship_updates": ["string"],
         "world_facts": ["string"],
+        "setting_concepts": [
+            {
+                "name": "string",
+                "concept_type": "world_concept|power_system|system_rank|technique|resource|rule_mechanism|terminology",
+                "definition": "string",
+                "rules": ["string"],
+                "limitations": ["string"],
+                "related_concepts": ["string"],
+                "related_characters": ["string"],
+                "confidence": 0.0,
+            }
+        ],
         "plot_threads": ["string"],
         "foreshadowing": ["string"],
         "open_questions": ["string"],
@@ -64,6 +92,11 @@ def build_chunk_analysis_messages(
             "embedding_summary": "string",
         },
     }
+    contract = {
+        "purpose": "novel_chunk_analysis",
+        "output": "Return one JSON object only. Follow this schema exactly.",
+        "schema": schema,
+    }
     user = {
         "task_id": task_id,
         "story_id": story_id,
@@ -76,10 +109,10 @@ def build_chunk_analysis_messages(
         "end_offset": chunk.end_offset,
         "previous_context": previous_context[:1200],
         "source_text": chunk.text,
-        "schema": schema,
     }
     return [
         {"role": "system", "content": compose_system_prompt(purpose="novel_chunk_analysis").system_content},
+        {"role": "user", "content": json.dumps(contract, ensure_ascii=False, indent=2)},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False, indent=2)},
     ]
 
@@ -114,6 +147,19 @@ def build_chapter_analysis_messages(
         "relationship_updates": ["string"],
         "plot_progress": ["string"],
         "world_rules_confirmed": ["string"],
+        "setting_concepts": [
+            {
+                "name": "string",
+                "concept_type": "world_concept|power_system|system_rank|technique|resource|rule_mechanism|terminology",
+                "definition": "string",
+                "rules": ["string"],
+                "limitations": ["string"],
+                "related_concepts": ["string"],
+                "related_characters": ["string"],
+                "status": "candidate|confirmed",
+                "confidence": 0.0,
+            }
+        ],
         "foreshadowing": ["string"],
         "open_questions": ["string"],
         "scene_markers": ["string"],
@@ -122,6 +168,11 @@ def build_chapter_analysis_messages(
         "retrieval_keywords": ["string"],
         "embedding_summary": "string",
     }
+    contract = {
+        "purpose": "novel_chapter_analysis",
+        "output": "Return one JSON object only. Follow this schema exactly.",
+        "schema": schema,
+    }
     user = {
         "task_id": task_id,
         "story_id": story_id,
@@ -129,10 +180,10 @@ def build_chapter_analysis_messages(
         "source_type": source_type,
         "chapter_index": chapter_index,
         "chunk_analyses": chunk_analyses,
-        "schema": schema,
     }
     return [
         {"role": "system", "content": compose_system_prompt(purpose="novel_chapter_analysis").system_content},
+        {"role": "user", "content": json.dumps(contract, ensure_ascii=False, indent=2)},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False, indent=2)},
     ]
 
@@ -154,14 +205,33 @@ def build_global_analysis_messages(
             {
                 "character_id": "string",
                 "name": "string",
-                "identity": ["string"],
-                "goals": ["string"],
-                "fears": ["string"],
+                "aliases": ["string"],
+                "role_type": "string",
+                "identity_tags": ["string"],
+                "appearance_profile": ["string"],
+                "stable_traits": ["string"],
+                "wounds_or_fears": ["string"],
+                "current_goals": ["string"],
+                "hidden_goals": ["string"],
+                "moral_boundaries": ["string"],
                 "knowledge_boundary": ["string"],
                 "voice_profile": ["string"],
+                "dialogue_do": ["string"],
+                "dialogue_do_not": ["string"],
                 "gesture_patterns": ["string"],
+                "decision_patterns": ["string"],
+                "relationship_views": {},
+                "arc_stage": "string",
+                "allowed_changes": ["string"],
                 "forbidden_actions": ["string"],
+                "forbidden_changes": ["string"],
+                "source_span_ids": ["string"],
+                "confidence": 0.0,
+                "status": "candidate|confirmed",
             }
+        ],
+        "candidate_character_mentions": [
+            {"name": "string", "reason": "string", "evidence_count": 0, "status": "candidate|excluded_non_character"}
         ],
         "relationship_graph": [
             {
@@ -183,6 +253,29 @@ def build_global_analysis_messages(
             }
         ],
         "world_rules": ["string"],
+        "setting_systems": {
+            "world_concepts": [
+                {
+                    "concept_id": "string",
+                    "name": "string",
+                    "concept_type": "string",
+                    "definition": "string",
+                    "aliases": ["string"],
+                    "rules": ["string"],
+                    "limitations": ["string"],
+                    "related_concepts": ["string"],
+                    "related_characters": ["string"],
+                    "confidence": 0.0,
+                    "status": "candidate|confirmed",
+                }
+            ],
+            "power_systems": ["same object shape"],
+            "system_ranks": ["same object shape; include rank_order/system_id in metadata when known"],
+            "techniques": ["same object shape; include required_rank_id/system_id/cost_or_price in metadata when known"],
+            "resource_concepts": ["same object shape"],
+            "rule_mechanisms": ["same object shape"],
+            "terminology": ["same object shape"],
+        },
         "timeline": ["string"],
         "foreshadowing_states": ["string"],
         "style_bible": {},
@@ -197,15 +290,20 @@ def build_global_analysis_messages(
             }
         ],
     }
+    contract = {
+        "purpose": "novel_global_analysis",
+        "output": "Return one JSON object only. Follow this schema exactly.",
+        "schema": schema,
+    }
     user = {
         "task_id": task_id,
         "story_id": story_id,
         "story_title": story_title,
         "source_type": source_type,
         "chapter_analyses": chapter_analyses,
-        "schema": schema,
     }
     return [
         {"role": "system", "content": compose_system_prompt(purpose="novel_global_analysis").system_content},
+        {"role": "user", "content": json.dumps(contract, ensure_ascii=False, indent=2)},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False, indent=2)},
     ]

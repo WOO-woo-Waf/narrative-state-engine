@@ -10,6 +10,9 @@ from narrative_state_engine.domain.models import (
     AuthorPlanProposal,
     AuthorPlotPlan,
     ChapterBlueprint,
+    RuleMechanism,
+    TerminologyEntry,
+    WorldConcept,
 )
 from narrative_state_engine.models import NovelAgentState
 
@@ -77,6 +80,27 @@ _PACING_TOKENS = [
     "\u5feb",
     "pacing",
 ]
+_SETTING_TOKENS = [
+    "\u4fee\u70bc",
+    "\u4fee\u884c",
+    "\u5883\u754c",
+    "\u7b51\u57fa",
+    "\u7075\u6839",
+    "\u529f\u6cd5",
+    "\u6cd5\u672f",
+    "\u79d8\u672f",
+    "\u7075\u77f3",
+    "\u4e39\u836f",
+    "\u7a81\u7834",
+    "\u53cd\u566c",
+    "\u4ee3\u4ef7",
+    "\u5951\u7ea6",
+    "\u4f53\u7cfb",
+    "system",
+    "rank",
+    "skill",
+    "resource",
+]
 
 
 class AuthorPlanningEngine:
@@ -140,6 +164,7 @@ class AuthorPlanningEngine:
             state.domain.chapter_blueprints,
             confirmed.proposed_chapter_blueprints,
         )
+        _apply_setting_constraints(state, confirmed.proposed_constraints)
 
         for idx, item in enumerate(state.domain.author_plan_proposals):
             if item.proposal_id == proposal.proposal_id:
@@ -203,6 +228,8 @@ def _clean_clause(text: str) -> str:
 def _intent_type_for_clause(clause: str) -> str:
     if _contains_any(clause, _ENDING_TOKENS):
         return "ending_direction"
+    if _contains_any(clause, _SETTING_TOKENS):
+        return "setting_system"
     if _contains_any(clause, _FORBIDDEN_TOKENS):
         return "forbidden_development"
     if _contains_any(clause, _FORESHADOWING_TOKENS):
@@ -263,6 +290,8 @@ def _constraint_type_for_intent(intent_type: str) -> str:
         return "required_beat"
     if intent_type == "pacing":
         return "pacing_target"
+    if intent_type == "setting_system":
+        return "setting_system"
     return "general"
 
 
@@ -492,3 +521,60 @@ def _merge_list(left: list[str], right: list[str]) -> list[str]:
         seen.add(value)
         out.append(value)
     return out
+
+
+def _apply_setting_constraints(state: NovelAgentState, constraints: list[AuthorConstraint]) -> None:
+    for constraint in constraints:
+        if constraint.status != "confirmed" or constraint.constraint_type != "setting_system":
+            continue
+        text = constraint.text.strip()
+        if not text:
+            continue
+        concept_id = f"{constraint.constraint_id}-setting"
+        if any(token in text for token in ["不能", "不得", "不可", "必须", "突破", "反噬", "代价", "限制", "条件"]):
+            if not any(item.concept_id == concept_id for item in state.domain.rule_mechanisms):
+                state.domain.rule_mechanisms.append(
+                    RuleMechanism(
+                        concept_id=concept_id,
+                        name=_setting_name_from_text(text),
+                        definition=text,
+                        rules=[text],
+                        limitations=[text] if any(token in text for token in ["不能", "不得", "不可", "反噬", "代价", "限制"]) else [],
+                        confidence=1.0,
+                        status="confirmed",
+                        author_locked=True,
+                    )
+                )
+            continue
+        if any(token in text for token in ["灵根", "命格", "契约", "血脉", "道心", "体系"]):
+            if not any(item.concept_id == concept_id for item in state.domain.world_concepts):
+                state.domain.world_concepts.append(
+                    WorldConcept(
+                        concept_id=concept_id,
+                        name=_setting_name_from_text(text),
+                        definition=text,
+                        rules=[text],
+                        confidence=1.0,
+                        status="confirmed",
+                        author_locked=True,
+                    )
+                )
+            continue
+        if not any(item.concept_id == concept_id for item in state.domain.terminology):
+            state.domain.terminology.append(
+                TerminologyEntry(
+                    concept_id=concept_id,
+                    name=_setting_name_from_text(text),
+                    definition=text,
+                    confidence=1.0,
+                    status="confirmed",
+                    author_locked=True,
+                )
+            )
+
+
+def _setting_name_from_text(text: str) -> str:
+    match = re.search(r"[\u4e00-\u9fffA-Za-z0-9_]{2,12}(?:体系|境|阶|级|品|灵根|功法|法术|秘术|灵石|丹药|规则|条件|代价|反噬|契约)", text)
+    if match:
+        return match.group(0)
+    return text[:16]

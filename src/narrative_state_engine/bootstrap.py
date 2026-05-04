@@ -10,6 +10,9 @@ from narrative_state_engine.domain import (
     GraphNode,
     NarrativeEvent,
     PlotThreadState,
+    PowerSystem,
+    ResourceConcept,
+    RuleMechanism,
     SceneAtmosphere,
     SceneState,
     SourceChapter,
@@ -20,6 +23,10 @@ from narrative_state_engine.domain import (
     StylePattern,
     StyleProfile,
     StyleSnippet,
+    SystemRank,
+    TechniqueOrSkill,
+    TerminologyEntry,
+    WorldConcept,
     WorldRule,
     WorldState,
 )
@@ -171,6 +178,21 @@ def apply_analysis_to_state(state: NovelAgentState, analysis: AnalysisRunResult)
             list(card.appearance_profile),
             limit=20,
         )
+        character.goals = _merge_unique(
+            character.goals,
+            list(card.current_goals),
+            limit=20,
+        )
+        character.fears = _merge_unique(
+            character.fears,
+            list(card.wounds_or_fears),
+            limit=20,
+        )
+        character.knowledge_boundary = _merge_unique(
+            character.knowledge_boundary,
+            list(card.knowledge_boundary),
+            limit=20,
+        )
         character.voice_profile = _merge_unique(
             character.voice_profile,
             list(card.voice_profile),
@@ -272,6 +294,14 @@ def apply_analysis_to_state(state: NovelAgentState, analysis: AnalysisRunResult)
 
 
 def _apply_analysis_to_domain_state(state: NovelAgentState, analysis: AnalysisRunResult) -> None:
+    locked_world_concepts = [item for item in state.domain.world_concepts if item.author_locked]
+    locked_domain_world_rules = [item for item in state.domain.world_rules if item.author_locked]
+    locked_power_systems = [item for item in state.domain.power_systems if item.author_locked]
+    locked_system_ranks = [item for item in state.domain.system_ranks if item.author_locked]
+    locked_techniques = [item for item in state.domain.techniques if item.author_locked]
+    locked_resource_concepts = [item for item in state.domain.resource_concepts if item.author_locked]
+    locked_rule_mechanisms = [item for item in state.domain.rule_mechanisms if item.author_locked]
+    locked_terminology = [item for item in state.domain.terminology if item.author_locked]
     document_id = f"source-{analysis.story_id}"
     state.domain.source_documents = [
         SourceDocument(
@@ -334,25 +364,88 @@ def _apply_analysis_to_domain_state(state: NovelAgentState, analysis: AnalysisRu
             rule_type=rule.rule_type,
             stability="confirmed",
             source_span_ids=list(rule.source_snippet_ids),
+            confidence=rule.confidence,
+            status=rule.status,
+            source_type=rule.source_type,
+            updated_by=rule.updated_by,
+            author_locked=rule.author_locked,
+            revision_history=list(rule.revision_history),
         )
         for rule in analysis.story_bible.world_rules
     ]
+    state.domain.world_rules = _merge_author_locked_by_id(locked_domain_world_rules, state.domain.world_rules)
+    state.domain.world_concepts = [
+        WorldConcept(**_concept_payload(item.model_dump(mode="json")))
+        for item in analysis.story_bible.world_concepts
+    ]
+    state.domain.world_concepts = _merge_author_locked_by_id(locked_world_concepts, state.domain.world_concepts)
+    state.domain.power_systems = [
+        PowerSystem(**_concept_payload(item.model_dump(mode="json")))
+        for item in analysis.story_bible.power_systems
+    ]
+    state.domain.power_systems = _merge_author_locked_by_id(locked_power_systems, state.domain.power_systems)
+    state.domain.system_ranks = [
+        SystemRank(**_concept_payload(item.model_dump(mode="json"), extra_keys={"system_id", "rank_order"}))
+        for item in analysis.story_bible.system_ranks
+    ]
+    state.domain.system_ranks = _merge_author_locked_by_id(locked_system_ranks, state.domain.system_ranks)
+    state.domain.techniques = [
+        TechniqueOrSkill(
+            **_concept_payload(item.model_dump(mode="json"), extra_keys={"system_id", "required_rank_id", "cost_or_price"})
+        )
+        for item in analysis.story_bible.techniques
+    ]
+    state.domain.techniques = _merge_author_locked_by_id(locked_techniques, state.domain.techniques)
+    state.domain.resource_concepts = [
+        ResourceConcept(**_concept_payload(item.model_dump(mode="json"), extra_keys={"resource_type"}))
+        for item in analysis.story_bible.resource_concepts
+    ]
+    state.domain.resource_concepts = _merge_author_locked_by_id(locked_resource_concepts, state.domain.resource_concepts)
+    state.domain.rule_mechanisms = [
+        RuleMechanism(**_concept_payload(item.model_dump(mode="json"), extra_keys={"mechanism_type"}))
+        for item in analysis.story_bible.rule_mechanisms
+    ]
+    state.domain.rule_mechanisms = _merge_author_locked_by_id(locked_rule_mechanisms, state.domain.rule_mechanisms)
+    state.domain.terminology = [
+        TerminologyEntry(**_concept_payload(item.model_dump(mode="json")))
+        for item in analysis.story_bible.terminology
+    ]
+    state.domain.terminology = _merge_author_locked_by_id(locked_terminology, state.domain.terminology)
     if global_state:
         state.domain.world.setting_summary = global_state.story_synopsis[:600]
 
-    state.domain.characters = [
+    incoming_characters = [
         CharacterCard(
             character_id=card.character_id,
             name=card.name or "角色",
+            aliases=list(card.aliases),
+            role_type=card.role_type,
+            identity_tags=list(card.identity_tags),
             appearance_profile=list(card.appearance_profile),
+            stable_traits=list(card.stable_traits),
+            wounds_or_fears=list(card.wounds_or_fears),
+            current_goals=list(card.current_goals),
+            hidden_goals=list(card.hidden_goals),
+            moral_boundaries=list(card.moral_boundaries),
+            knowledge_boundary=list(card.knowledge_boundary),
             voice_profile=list(card.voice_profile),
-            dialogue_do=list(card.dialogue_patterns),
+            dialogue_do=list(card.dialogue_do or card.dialogue_patterns),
+            dialogue_do_not=list(card.dialogue_do_not),
             gesture_patterns=list(card.gesture_patterns),
-            stable_traits=list(card.voice_profile),
+            decision_patterns=list(card.decision_patterns),
+            forbidden_actions=list(card.forbidden_actions),
             source_span_ids=[],
+            confidence=card.confidence,
+            status=card.status,
+            source_type=card.source_type,
+            updated_by=card.updated_by,
+            author_locked=card.author_locked,
+            revision_history=list(card.revision_history),
         )
         for card in analysis.story_bible.character_cards
     ]
+    state.domain.characters = _merge_author_locked_characters(state.domain.characters, incoming_characters)
+    state.domain.candidate_character_mentions = list(analysis.story_bible.candidate_character_mentions)
     state.domain.character_dynamic_states = [
         CharacterDynamicState(
             character_id=card.character_id,
@@ -435,14 +528,28 @@ def _apply_analysis_to_domain_state(state: NovelAgentState, analysis: AnalysisRu
     state.domain.foreshadowing = foreshadowing[:80]
     state.domain.style_profile = StyleProfile(
         profile_id=f"style-{analysis.story_id}",
-        narrative_pov=state.style.narrative_pov,
-        tense=state.style.tense,
+        narrative_pov=analysis.story_bible.style_profile.narrative_pov or state.style.narrative_pov,
+        tense=analysis.story_bible.style_profile.tense or state.style.tense,
+        narrative_distance=analysis.story_bible.style_profile.narrative_distance,
         sentence_length_distribution=dict(analysis.story_bible.style_profile.sentence_length_distribution),
-        dialogue_ratio=float(analysis.story_bible.style_profile.dialogue_signature.get("dialogue_ratio", 0.0) or 0.0),
+        paragraph_length_distribution=dict(analysis.story_bible.style_profile.paragraph_length_distribution),
+        dialogue_ratio=float(
+            analysis.story_bible.style_profile.dialogue_ratio
+            or analysis.story_bible.style_profile.dialogue_signature.get("dialogue_ratio", 0.0)
+            or 0.0
+        ),
         description_mix=dict(analysis.story_bible.style_profile.description_mix),
         rhetoric_markers=list(analysis.story_bible.style_profile.rhetoric_markers),
         lexical_fingerprint=list(analysis.story_bible.style_profile.lexical_fingerprint),
+        pacing_profile=dict(analysis.story_bible.style_profile.pacing_profile),
         forbidden_patterns=list(analysis.story_bible.style_profile.negative_style_rules),
+        source_span_ids=list(analysis.story_bible.style_profile.source_span_ids),
+        confidence=analysis.story_bible.style_profile.confidence,
+        status=analysis.story_bible.style_profile.status,
+        source_type=analysis.story_bible.style_profile.source_type,
+        updated_by=analysis.story_bible.style_profile.updated_by,
+        author_locked=analysis.story_bible.style_profile.author_locked,
+        revision_history=list(analysis.story_bible.style_profile.revision_history),
     )
     state.domain.style_snippets = [
         StyleSnippet(
@@ -514,6 +621,18 @@ def _apply_analysis_to_domain_state(state: NovelAgentState, analysis: AnalysisRu
                 preserved_ids=[item.thread_id for item in state.domain.plot_threads],
             )
         )
+    setting_summary = _setting_system_summary(state)
+    if setting_summary:
+        compressed.append(
+            CompressedMemoryBlock(
+                block_id=f"{analysis.analysis_version}-setting-systems",
+                block_type="setting_systems",
+                scope="global",
+                summary=setting_summary[:2000],
+                key_points=_setting_system_names(state)[:40],
+                preserved_ids=_setting_system_ids(state),
+            )
+        )
     state.domain.compressed_memory = compressed
     state.domain.memory_compression.rolling_story_summary = analysis.story_synopsis[:4000]
     state.domain.memory_compression.recent_chapter_summaries = [
@@ -549,6 +668,13 @@ def _apply_analysis_to_domain_state(state: NovelAgentState, analysis: AnalysisRu
         state.domain.style_profile.model_dump(mode="json")
         if state.domain.style_profile is not None
         else {}
+    )
+    state.domain.memory_compression.compression_trace.append(
+        {
+            "analysis_version": analysis.analysis_version,
+            "status": "setting_systems_initialized",
+            "concept_count": len(_setting_system_ids(state)),
+        }
     )
     state.domain.memory_compression.unresolved_threads = [
         {
@@ -642,6 +768,106 @@ def _build_style_patterns(state: NovelAgentState, analysis: AnalysisRunResult) -
     return patterns
 
 
+def _merge_author_locked_characters(existing: list[CharacterCard], incoming: list[CharacterCard]) -> list[CharacterCard]:
+    rows: dict[str, CharacterCard] = {}
+    for item in existing:
+        key = item.character_id or item.name
+        if key:
+            rows[key] = item
+    for item in incoming:
+        key = item.character_id or item.name
+        if not key:
+            continue
+        current = rows.get(key)
+        if current is not None and current.author_locked:
+            current.revision_history.append(
+                {
+                    "updated_by": "analysis",
+                    "action": "ignored_due_to_author_locked",
+                    "incoming_name": item.name,
+                }
+            )
+            continue
+        rows[key] = item
+    return list(rows.values())
+
+
+def _merge_author_locked_by_id(locked: list, incoming: list) -> list:
+    rows = {getattr(item, "concept_id", getattr(item, "rule_id", "")): item for item in incoming}
+    for item in locked:
+        key = getattr(item, "concept_id", getattr(item, "rule_id", ""))
+        if key:
+            rows[key] = item
+    return list(rows.values())
+
+
+def _concept_payload(payload: dict, *, extra_keys: set[str] | None = None) -> dict:
+    metadata = dict(payload.get("metadata") or {})
+    allowed = {
+        "concept_id",
+        "name",
+        "concept_type",
+        "definition",
+        "aliases",
+        "rules",
+        "limitations",
+        "related_concepts",
+        "related_characters",
+        "source_span_ids",
+        "confidence",
+        "status",
+        "source_type",
+        "updated_by",
+        "author_locked",
+        "revision_history",
+    }
+    if extra_keys:
+        allowed.update(extra_keys)
+    row = {key: value for key, value in payload.items() if key in allowed}
+    for key in extra_keys or set():
+        if key not in row and key in metadata:
+            row[key] = metadata[key]
+    return row
+
+
+def _setting_system_items(state: NovelAgentState) -> list:
+    return [
+        *state.domain.world_concepts,
+        *state.domain.power_systems,
+        *state.domain.system_ranks,
+        *state.domain.techniques,
+        *state.domain.resource_concepts,
+        *state.domain.rule_mechanisms,
+        *state.domain.terminology,
+    ]
+
+
+def _setting_system_names(state: NovelAgentState) -> list[str]:
+    return _unique_keep_order([item.name for item in _setting_system_items(state) if item.name])
+
+
+def _setting_system_ids(state: NovelAgentState) -> list[str]:
+    return _unique_keep_order([item.concept_id for item in _setting_system_items(state) if item.concept_id])
+
+
+def _setting_system_summary(state: NovelAgentState) -> str:
+    rows = []
+    groups = [
+        ("概念", state.domain.world_concepts),
+        ("体系", state.domain.power_systems),
+        ("等级", state.domain.system_ranks),
+        ("功法技能", state.domain.techniques),
+        ("资源", state.domain.resource_concepts),
+        ("机制", state.domain.rule_mechanisms),
+        ("术语", state.domain.terminology),
+    ]
+    for label, items in groups:
+        names = [item.name for item in items[:8] if item.name]
+        if names:
+            rows.append(f"{label}: {', '.join(names)}")
+    return "；".join(rows)
+
+
 def _refresh_domain_graph(state: NovelAgentState) -> None:
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
@@ -664,6 +890,40 @@ def _refresh_domain_graph(state: NovelAgentState) -> None:
                 properties={"status": plot.status, "stakes": plot.stakes},
             )
         )
+    for concept in _setting_system_items(state):
+        nodes.append(
+            GraphNode(
+                node_id=concept.concept_id,
+                node_type=str(concept.concept_type or "setting_concept"),
+                label=concept.name,
+                properties={
+                    "status": concept.status,
+                    "definition": concept.definition[:120],
+                    "rules": concept.rules[:4],
+                    "limitations": concept.limitations[:4],
+                },
+            )
+        )
+        for related in concept.related_concepts:
+            if related:
+                edges.append(
+                    GraphEdge(
+                        edge_id=f"{concept.concept_id}->{related}",
+                        source_node_id=concept.concept_id,
+                        target_node_id=related,
+                        relation_type="setting_related_concept",
+                    )
+                )
+        for character_id in concept.related_characters:
+            if character_id:
+                edges.append(
+                    GraphEdge(
+                        edge_id=f"{character_id}->{concept.concept_id}",
+                        source_node_id=character_id,
+                        target_node_id=concept.concept_id,
+                        relation_type="character_uses_or_knows_setting",
+                    )
+                )
     for event in state.domain.events:
         nodes.append(
             GraphNode(

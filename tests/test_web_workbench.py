@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -29,6 +30,35 @@ def test_job_manager_rejects_unknown_task():
 def test_job_command_rejects_input_outside_novels_input():
     with pytest.raises(ValueError):
         build_command("ingest-txt", {"file": "README.md"})
+
+
+def test_ingest_txt_command_uses_python_module_and_input_file():
+    command = build_command(
+        "ingest-txt",
+        {
+            "story_id": "story_fresh",
+            "task_id": "task_fresh",
+            "file": "novels_input/1.txt",
+            "title": "target_continuation_1",
+            "source_type": "target_continuation",
+            "target_chars": 1000,
+            "overlap_chars": 160,
+        },
+    )
+
+    assert command[:4] == [sys.executable, "-m", "narrative_state_engine.cli", "ingest-txt"]
+    assert command[command.index("--file") + 1] == str(Path("novels_input/1.txt"))
+    assert command[command.index("--story-id") + 1] == "story_fresh"
+    assert command[command.index("--task-id") + 1] == "task_fresh"
+    assert command[command.index("--target-chars") + 1] == "1000"
+    assert command[command.index("--overlap-chars") + 1] == "160"
+
+
+def test_ingest_txt_command_defaults_to_small_vector_chunks():
+    command = build_command("ingest-txt", {"file": "novels_input/1.txt"})
+
+    assert command[command.index("--target-chars") + 1] == "1000"
+    assert command[command.index("--overlap-chars") + 1] == "160"
 
 
 def test_backfill_command_uses_python_module_and_safe_flags():

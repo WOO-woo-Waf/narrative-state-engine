@@ -15,8 +15,8 @@ $stderrLog = Join-Path $logDir "web_workbench.err.log"
 function Test-WorkbenchHealth {
   param([string]$BaseUrl)
   try {
-    $response = Invoke-RestMethod -Uri "$BaseUrl/api/health" -TimeoutSec 2
-    return $null -ne $response
+    $response = Invoke-WebRequest -Uri "$BaseUrl/" -TimeoutSec 2 -UseBasicParsing
+    return [int]$response.StatusCode -eq 200
   } catch {
     return $false
   }
@@ -30,16 +30,25 @@ if (Test-WorkbenchHealth -BaseUrl $baseUrl) {
   return
 }
 
-$command = @"
-Set-Location -LiteralPath '$repoRoot'
-conda activate $CondaEnv
-python -m narrative_state_engine.cli web --host $HostAddress --port $Port 1>> '$stdoutLog' 2>> '$stderrLog'
-"@
-
 $process = Start-Process `
-  -FilePath powershell `
-  -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $command) `
+  -FilePath "conda" `
+  -ArgumentList @(
+    "run",
+    "--no-capture-output",
+    "-n",
+    $CondaEnv,
+    "python",
+    "-m",
+    "narrative_state_engine.cli",
+    "web",
+    "--host",
+    $HostAddress,
+    "--port",
+    "$Port"
+  ) `
   -WorkingDirectory $repoRoot `
+  -RedirectStandardOutput $stdoutLog `
+  -RedirectStandardError $stderrLog `
   -WindowStyle Hidden `
   -PassThru
 

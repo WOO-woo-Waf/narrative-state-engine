@@ -1,5 +1,5 @@
 from narrative_state_engine.graph.workflow import run_pipeline
-from narrative_state_engine.graph.nodes import TemplateDraftGenerator
+from narrative_state_engine.graph.nodes import TemplateDraftGenerator, plot_planner
 from narrative_state_engine.models import (
     CommitStatus,
     NovelAgentState,
@@ -42,3 +42,13 @@ def test_pipeline_rolls_back_on_blocked_trope():
     assert result.validation.status == ValidationStatus.PASSED
     assert result.commit.status == CommitStatus.COMMITTED
     assert result.metadata.get("repair_attempts", 0) >= 1
+
+
+def test_plot_planner_prefers_objective_over_demo_placeholder_arc():
+    state = NovelAgentState.demo("续写下一章。")
+    state.chapter.objective = "完成约三万字的一整章，并将女主的反差贯彻始终。"
+
+    result = plot_planner(state, None)
+
+    assert result.metadata["planned_beat"] == state.chapter.objective
+    assert result.metadata.get("selected_plot_thread") is None

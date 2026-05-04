@@ -21,7 +21,12 @@ ALLOWED_TASKS = {
     "backfill-embeddings",
     "search-debug",
     "author-session",
+    "create-state",
+    "edit-state",
     "generate-chapter",
+    "branch-status",
+    "accept-branch",
+    "reject-branch",
 }
 
 
@@ -159,7 +164,7 @@ def build_command(task: str, params: dict[str, Any]) -> list[str]:
         file_path = safe_existing_input(clean_string(params, "file", "novels_input/1.txt"))
         title = clean_string(params, "title", file_path.stem)
         source_type = clean_string(params, "source_type", "target_continuation")
-        return [
+        command = [
             *base,
             "--task-id",
             task_id,
@@ -171,7 +176,12 @@ def build_command(task: str, params: dict[str, Any]) -> list[str]:
             title,
             "--source-type",
             source_type,
+            "--target-chars",
+            str(int_param(params, "target_chars", 1000, 300)),
+            "--overlap-chars",
+            str(int_param(params, "overlap_chars", 160, 0)),
         ]
+        return command
 
     if task == "analyze-task":
         file_path = safe_existing_input(clean_string(params, "file", "novels_input/1.txt"))
@@ -187,6 +197,10 @@ def build_command(task: str, params: dict[str, Any]) -> list[str]:
             clean_string(params, "title", file_path.stem),
             "--source-type",
             clean_string(params, "source_type", "target_continuation"),
+            "--max-chunk-chars",
+            str(int_param(params, "max_chunk_chars", 10000, 400)),
+            "--overlap-chars",
+            str(int_param(params, "overlap_chars", 800, 0)),
             "--llm-concurrency",
             str(int_param(params, "concurrency", 1, 1)),
         ]
@@ -203,6 +217,8 @@ def build_command(task: str, params: dict[str, Any]) -> list[str]:
     if task == "backfill-embeddings":
         return [
             *base,
+            "--task-id",
+            task_id,
             "--story-id",
             story_id,
             "--limit",
@@ -216,6 +232,8 @@ def build_command(task: str, params: dict[str, Any]) -> list[str]:
     if task == "search-debug":
         command = [
             *base,
+            "--task-id",
+            task_id,
             "--story-id",
             story_id,
             "--query",
@@ -233,6 +251,8 @@ def build_command(task: str, params: dict[str, Any]) -> list[str]:
     if task == "author-session":
         command = [
             *base,
+            "--task-id",
+            task_id,
             "--story-id",
             story_id,
             "--seed",
@@ -240,6 +260,9 @@ def build_command(task: str, params: dict[str, Any]) -> list[str]:
             "--retrieval-limit",
             str(int_param(params, "retrieval_limit", 12, 1)),
         ]
+        branch_id = clean_string(params, "branch_id", "")
+        if branch_id:
+            command.extend(["--branch-id", branch_id])
         for answer in params.get("answers", []) or []:
             if str(answer).strip():
                 command.extend(["--answer", str(answer).strip()])
@@ -248,9 +271,39 @@ def build_command(task: str, params: dict[str, Any]) -> list[str]:
         command.append("--persist" if bool_flag(params.get("persist", True)) else "--no-persist")
         return command
 
+    if task == "create-state":
+        command = [
+            *base,
+            clean_string(params, "description", "从零创建一部新小说的初始状态。"),
+            "--story-id",
+            story_id,
+            "--task-id",
+            task_id,
+            "--title",
+            clean_string(params, "title", story_id),
+            "--chapter-number",
+            str(int_param(params, "chapter_number", 1, 1)),
+        ]
+        command.append("--persist" if bool_flag(params.get("persist", True)) else "--no-persist")
+        return command
+
+    if task == "edit-state":
+        command = [
+            *base,
+            clean_string(params, "author_input", "补充一条作者设定。"),
+            "--story-id",
+            story_id,
+            "--task-id",
+            task_id,
+        ]
+        if bool_flag(params.get("confirm", False)):
+            command.append("--confirm")
+        command.append("--persist" if bool_flag(params.get("persist", True)) else "--no-persist")
+        return command
+
     if task == "generate-chapter":
         output = safe_output_path(clean_string(params, "output", "novels_output/chapter_preview.txt"))
-        return [
+        command = [
             *base,
             clean_string(params, "prompt", "按照作者已经确认的剧情结构，继续写下一章。"),
             "--task-id",
@@ -268,7 +321,25 @@ def build_command(task: str, params: dict[str, Any]) -> list[str]:
             "--output",
             str(output.relative_to(PROJECT_ROOT)),
             "--persist" if bool_flag(params.get("persist", False)) else "--no-persist",
+            "--branch-mode",
+            clean_string(params, "branch_mode", "draft"),
             "--rag" if bool_flag(params.get("rag", True)) else "--no-rag",
         ]
+        base_version = int_param(params, "base_version", 0, 0)
+        if base_version:
+            command.extend(["--base-version", str(base_version)])
+        parent_branch = clean_string(params, "continue_from_branch", "")
+        if parent_branch:
+            command.extend(["--continue-from-branch", parent_branch])
+        return command
+
+    if task == "branch-status":
+        return [*base, "--story-id", story_id, "--task-id", task_id, "--limit", str(int_param(params, "limit", 30, 1))]
+
+    if task in {"accept-branch", "reject-branch"}:
+        branch_id = clean_string(params, "branch_id", "")
+        if not branch_id:
+            raise ValueError("branch_id is required")
+        return [*base, "--story-id", story_id, "--task-id", task_id, "--branch-id", branch_id]
 
     raise ValueError(f"unsupported task: {task}")

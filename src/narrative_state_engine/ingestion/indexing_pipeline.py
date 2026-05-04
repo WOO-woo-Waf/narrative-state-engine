@@ -10,6 +10,7 @@ from sqlalchemy.engine import Engine
 from narrative_state_engine.ingestion.chapter_splitter import split_chapters
 from narrative_state_engine.ingestion.chunker import chunk_chapter
 from narrative_state_engine.ingestion.txt_loader import load_txt
+from narrative_state_engine.task_scope import normalize_task_id, scoped_storage_id
 
 
 @dataclass(frozen=True)
@@ -41,8 +42,9 @@ class TxtIngestionPipeline:
         target_chars: int = 1000,
         overlap_chars: int = 160,
     ) -> IngestResult:
+        task_id = normalize_task_id(task_id, story_id)
         loaded = load_txt(file_path, encoding=encoding)
-        document_id = f"{story_id}:{loaded.sha256[:16]}"
+        document_id = scoped_storage_id("src", task_id, story_id, loaded.sha256[:16])
         doc_title = title or loaded.path.stem
         chapters = split_chapters(loaded.text)
         chunk_count = 0
@@ -67,13 +69,35 @@ class TxtIngestionPipeline:
             conn.execute(
                 text(
                     """
+                    INSERT INTO task_runs (task_id, story_id, title, description, status, metadata, updated_at)
+                    VALUES (:task_id, :story_id, :title, :description, 'active', CAST(:metadata AS JSONB), NOW())
+                    ON CONFLICT (task_id) DO UPDATE
+                    SET story_id = EXCLUDED.story_id,
+                        title = COALESCE(NULLIF(EXCLUDED.title, ''), task_runs.title),
+                        description = COALESCE(NULLIF(EXCLUDED.description, ''), task_runs.description),
+                        status = 'active',
+                        metadata = task_runs.metadata || EXCLUDED.metadata,
+                        updated_at = NOW()
+                    """
+                ),
+                {
+                    "task_id": task_id,
+                    "story_id": story_id,
+                    "title": doc_title,
+                    "description": f"Task for {doc_title}",
+                    "metadata": json.dumps({"last_action": "ingest_txt", "source_type": source_type}, ensure_ascii=False),
+                },
+            )
+            conn.execute(
+                text(
+                    """
                     DELETE FROM narrative_evidence_index
-                    WHERE story_id = :story_id
+                    WHERE task_id = :task_id AND story_id = :story_id
                       AND source_table IN ('source_chunks', 'source_chapters')
                       AND metadata->>'document_id' = :document_id
                     """
                 ),
-                {"story_id": story_id, "document_id": document_id},
+                {"task_id": task_id, "story_id": story_id, "document_id": document_id},
             )
             conn.execute(text("DELETE FROM source_chunks WHERE document_id = :document_id"), {"document_id": document_id})
             conn.execute(text("DELETE FROM source_chapters WHERE document_id = :document_id"), {"document_id": document_id})
@@ -81,11 +105,11 @@ class TxtIngestionPipeline:
                 text(
                     """
                     INSERT INTO source_documents (
-                        document_id, story_id, title, author, source_type,
+                        document_id, task_id, story_id, title, author, source_type,
                         file_path, text_hash, total_chars, metadata
                     )
                     VALUES (
-                        :document_id, :story_id, :title, :author, :source_type,
+                        :document_id, :task_id, :story_id, :title, :author, :source_type,
                         :file_path, :text_hash, :total_chars, CAST(:metadata AS JSONB)
                     )
                     ON CONFLICT (document_id) DO UPDATE
@@ -100,6 +124,7 @@ class TxtIngestionPipeline:
                 ),
                 {
                     "document_id": document_id,
+                    "task_id": task_id,
                     "story_id": story_id,
                     "title": doc_title,
                     "author": author,
@@ -120,11 +145,11 @@ class TxtIngestionPipeline:
                     text(
                         """
                         INSERT INTO source_chapters (
-                            chapter_id, document_id, story_id, chapter_index, title,
+                            chapter_id, document_id, task_id, story_id, chapter_index, title,
                             start_offset, end_offset, summary, synopsis
                         )
                         VALUES (
-                            :chapter_id, :document_id, :story_id, :chapter_index, :title,
+                            :chapter_id, :document_id, :task_id, :story_id, :chapter_index, :title,
                             :start_offset, :end_offset, '', ''
                         )
                         ON CONFLICT (chapter_id) DO UPDATE
@@ -136,6 +161,7 @@ class TxtIngestionPipeline:
                     {
                         "chapter_id": chapter_id,
                         "document_id": document_id,
+                        "task_id": task_id,
                         "story_id": story_id,
                         "chapter_index": chapter.chapter_index,
                         "title": chapter.title,
@@ -156,12 +182,12 @@ class TxtIngestionPipeline:
                         text(
                             """
                             INSERT INTO source_chunks (
-                                chunk_id, document_id, chapter_id, story_id, chapter_index, chunk_index,
+                                chunk_id, document_id, chapter_id, task_id, story_id, chapter_index, chunk_index,
                                 start_offset, end_offset, text, chunk_type, token_estimate,
                                 metadata, tsv
                             )
                             VALUES (
-                                :chunk_id, :document_id, :chapter_id, :story_id, :chapter_index, :chunk_index,
+                                :chunk_id, :document_id, :chapter_id, :task_id, :story_id, :chapter_index, :chunk_index,
                                 :start_offset, :end_offset, :chunk_text, :chunk_type, :token_estimate,
                                 CAST(:metadata AS JSONB), to_tsvector('simple', :chunk_text)
                             )
@@ -182,6 +208,7 @@ class TxtIngestionPipeline:
                             "chunk_id": chunk_id,
                             "document_id": document_id,
                             "chapter_id": chapter_id,
+                            "task_id": task_id,
                             "story_id": story_id,
                             "chapter_index": chapter.chapter_index,
                             "chunk_index": chunk.chunk_index,
@@ -200,12 +227,12 @@ class TxtIngestionPipeline:
                         text(
                             """
                             INSERT INTO narrative_evidence_index (
-                                evidence_id, story_id, evidence_type, source_table, source_id,
+                                evidence_id, task_id, story_id, evidence_type, source_table, source_id,
                                 chapter_index, text, tags, canonical, importance, recency,
                                 tsv, metadata
                             )
                             VALUES (
-                                :evidence_id, :story_id, 'source_chunk', 'source_chunks', :source_id,
+                                :evidence_id, :task_id, :story_id, 'source_chunk', 'source_chunks', :source_id,
                                 :chapter_index, :chunk_text, CAST(:tags AS JSONB), TRUE, :importance, :recency,
                                 to_tsvector('simple', :chunk_text), CAST(:metadata AS JSONB)
                             )
@@ -225,7 +252,8 @@ class TxtIngestionPipeline:
                             """
                         ),
                         {
-                            "evidence_id": f"src:{chunk_id}",
+                            "evidence_id": scoped_storage_id("src", task_id, chunk_id),
+                            "task_id": task_id,
                             "story_id": story_id,
                             "source_id": chunk_id,
                             "chapter_index": chapter.chapter_index,

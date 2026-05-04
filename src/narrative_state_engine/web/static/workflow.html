@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>小说状态新任务向导</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7f9;
+      --panel: #ffffff;
+      --text: #20242a;
+      --muted: #66707d;
+      --line: #d9dee6;
+      --accent: #176b87;
+      --ok: #237a4b;
+      --warn: #a76512;
+      --bad: #b73535;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      padding: 14px 22px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    h1 { margin: 0; font-size: 18px; }
+    h2 { margin: 0 0 8px; font-size: 16px; }
+    h3 { margin: 0 0 6px; font-size: 14px; }
+    main { padding: 18px 22px 42px; max-width: 1180px; margin: 0 auto; }
+    a { color: var(--accent); text-decoration: none; }
+    button, input, select, textarea {
+      font: inherit;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+    }
+    button {
+      padding: 8px 12px;
+      cursor: pointer;
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    button.secondary { background: #fff; color: var(--text); border-color: var(--line); }
+    input, select, textarea { width: 100%; padding: 8px 10px; }
+    textarea { min-height: 96px; resize: vertical; }
+    label { display: grid; gap: 4px; font-weight: 700; }
+    label span { color: var(--muted); font-size: 12px; font-weight: 500; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    .grid { display: grid; gap: 12px; }
+    .cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .muted { color: var(--muted); }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #edf1f4;
+      color: #37424f;
+      margin: 2px 4px 2px 0;
+      font-size: 12px;
+    }
+    .pill.ok { background: #e7f3ec; color: var(--ok); }
+    .pill.warn { background: #fff3df; color: var(--warn); }
+    .pill.bad { background: #fae8e8; color: var(--bad); }
+    .step {
+      display: grid;
+      grid-template-columns: 42px 1fr auto;
+      gap: 12px;
+      align-items: start;
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+      margin-top: 12px;
+    }
+    .num {
+      width: 32px;
+      height: 32px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      background: #e9f2f5;
+      color: #0f4f67;
+      font-weight: 800;
+    }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 260px;
+      overflow: auto;
+      background: #f1f3f5;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+    }
+    .jobs { display: grid; gap: 8px; }
+    .job {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 10px;
+      background: #fff;
+    }
+    @media (max-width: 900px) {
+      header { display: grid; }
+      .cols-2, .cols-3 { grid-template-columns: 1fr; }
+      .step { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>小说状态新任务向导</h1>
+      <div class="muted">从 1/2/3.txt 重新建立分析状态、作者规划和续写分支。</div>
+    </div>
+    <div><a href="/">返回工作台</a></div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>本次任务身份</h2>
+      <div class="grid cols-3">
+        <label>Story ID<span>数据库中的小说状态归属</span><input id="storyId"></label>
+        <label>Task ID<span>本轮工程任务归属</span><input id="taskId"></label>
+        <label>输出章节<span>预览默认不写入主线</span><input id="outputPath" value="novels_output/fresh_chapter_001_preview.txt"></label>
+      </div>
+      <p class="muted">这组 ID 是新生成的，不会复用旧测试状态。想彻底隔离，就保持这两个 ID 不变跑完整流程。</p>
+      <button class="secondary" id="regenIds">重新生成 ID</button>
+    </section>
+
+    <section class="panel">
+      <h2>输入材料</h2>
+      <div class="grid cols-3">
+        <label>主续写文本<span>target_continuation</span><input id="file1" value="novels_input/1.txt"></label>
+        <label>风格/世界观参考<span>same_author_world_style</span><input id="file2" value="novels_input/2.txt"></label>
+        <label>联动/关系参考<span>crossover_linkage</span><input id="file3" value="novels_input/3.txt"></label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>作者输入</h2>
+      <div class="grid cols-2">
+        <label>状态修订<span>可补角色卡、世界观、风格、设定体系</span><textarea id="stateEdit">补充设定：把分析出的角色、设定和风格作为候选状态；作者锁定的补充内容优先于自动分析。</textarea></label>
+        <label>后续情节规划<span>会写入 AuthorPlotPlan / ChapterBlueprint</span><textarea id="authorSeed">下一章在已有小说状态基础上推进主线，保留人物关系张力，场景行动要清晰，结尾留下新的悬念。</textarea></label>
+      </div>
+      <label>续写目标<span>生成章节时使用</span><textarea id="objective">完成下一章正文，严格参考新的小说状态、角色卡、设定体系、检索证据和作者确认的剧情规划。</textarea></label>
+    </section>
+
+    <section class="panel">
+      <h2>推荐流程</h2>
+      <div id="steps"></div>
+    </section>
+
+    <section class="panel">
+      <h2>任务日志</h2>
+      <div class="jobs" id="jobs"></div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    const api = async (path, options) => {
+      const response = await fetch(path, options);
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    };
+    const pad = (value) => String(value).padStart(2, "0");
+    function idStamp() {
+      const d = new Date();
+      return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    }
+    function regenIds() {
+      const stamp = idStamp();
+      $("storyId").value = `story_fresh_novel_${stamp}`;
+      $("taskId").value = `task_fresh_novel_${stamp}`;
+      $("outputPath").value = `novels_output/${$("storyId").value}_chapter_001_preview.txt`;
+      renderSteps();
+    }
+    function common() {
+      return { story_id: $("storyId").value.trim(), task_id: $("taskId").value.trim() };
+    }
+    function steps() {
+      return [
+        {
+          title: "导入主续写文本",
+          task: "ingest-txt",
+          params: { ...common(), file: $("file1").value, title: "target_continuation_1", source_type: "target_continuation", target_chars: 1000, overlap_chars: 160 },
+          note: "写入 source_documents/source_chunks/evidence，作为主 canon；向量检索使用较小分块。"
+        },
+        {
+          title: "导入风格/世界观参考",
+          task: "ingest-txt",
+          params: { ...common(), file: $("file2").value, title: "same_author_world_style_2", source_type: "same_author_world_style", target_chars: 1000, overlap_chars: 160 },
+          note: "主要用于风格、叙述节奏和世界观表达参考。"
+        },
+        {
+          title: "导入联动/关系参考",
+          task: "ingest-txt",
+          params: { ...common(), file: $("file3").value, title: "crossover_linkage_3", source_type: "crossover_linkage", target_chars: 1000, overlap_chars: 160 },
+          note: "主要用于角色联动、关系呼应和交叉剧情参考。"
+        },
+        {
+          title: "补齐原文 embedding",
+          task: "backfill-embeddings",
+          params: { ...common(), limit: 5000, batch_size: 16 },
+          note: "让三份材料进入向量检索。"
+        },
+        {
+          title: "用新分析代码分析主文本",
+          task: "analyze-task",
+          params: { ...common(), file: $("file1").value, title: "target_continuation_1", source_type: "target_continuation", llm: true, concurrency: 3, max_chunk_chars: 10000, overlap_chars: 0, persist: true },
+          note: "产出 NovelStateBible：角色卡、设定体系、剧情线、风格和证据。"
+        },
+        {
+          title: "补齐分析证据 embedding",
+          task: "backfill-embeddings",
+          params: { ...common(), limit: 5000, batch_size: 16 },
+          note: "让分析出的结构化证据也参与后续 RAG。"
+        },
+        {
+          title: "作者自然语言修订状态",
+          task: "edit-state",
+          params: { ...common(), author_input: $("stateEdit").value, confirm: true, persist: true },
+          note: "把你的补充写成 author_locked 状态，后续分析不会静默覆盖。"
+        },
+        {
+          title: "作者确认后续情节",
+          task: "author-session",
+          params: { ...common(), seed: $("authorSeed").value, llm: true, rag: true, persist: true, retrieval_limit: 12 },
+          note: "写入 AuthorPlotPlan、AuthorConstraint 和 ChapterBlueprint。"
+        },
+        {
+          title: "生成下一章预览分支",
+          task: "generate-chapter",
+          params: {
+            ...common(),
+            prompt: "按照作者已经确认的剧情结构，结合新的小说状态、检索证据和风格参考，续写下一章。",
+            objective: $("objective").value,
+            rounds: 2,
+            min_chars: 1200,
+            min_paragraphs: 4,
+            output: $("outputPath").value,
+            persist: false,
+            branch_mode: "draft",
+            rag: true
+          },
+          note: "默认只生成预览，不写回主线；满意后可在普通工作台接受分支或改为 mainline/persist。"
+        }
+      ];
+    }
+    function renderSteps() {
+      $("steps").innerHTML = steps().map((step, index) => `
+        <div class="step">
+          <div class="num">${index + 1}</div>
+          <div>
+            <h3>${esc(step.title)}</h3>
+            <div><span class="pill">${esc(step.task)}</span><span class="pill warn">${esc(step.params.persist === false ? "preview" : "writes data")}</span></div>
+            <p class="muted">${esc(step.note)}</p>
+            <details><summary>查看参数</summary><pre>${esc(JSON.stringify(step.params, null, 2))}</pre></details>
+          </div>
+          <button data-step="${index}">运行这一步</button>
+        </div>
+      `).join("");
+      document.querySelectorAll("button[data-step]").forEach((btn) => {
+        btn.onclick = () => runStep(Number(btn.dataset.step));
+      });
+    }
+    async function runStep(index) {
+      const step = steps()[index];
+      if (!step.params.story_id || !step.params.task_id) {
+        alert("请先填写 Story ID 和 Task ID。");
+        return;
+      }
+      try {
+        await api("/api/jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ task: step.task, params: step.params })
+        });
+        await loadJobs();
+      } catch (error) {
+        alert(`提交失败：${error.message}`);
+      }
+    }
+    async function loadJobs() {
+      const data = await api("/api/jobs");
+      $("jobs").innerHTML = (data.jobs || []).slice(0, 20).map((job) => `
+        <div class="job">
+          <b>${esc(job.task)}</b>
+          <span class="pill ${job.status === "succeeded" ? "ok" : job.status === "failed" ? "bad" : "warn"}">${esc(job.status)}</span>
+          <span class="pill">exit=${esc(job.exit_code ?? "")}</span>
+          <p class="muted">${esc(job.created_at)}</p>
+          <pre>${esc((job.stdout || "") + (job.stderr ? "\n[stderr]\n" + job.stderr : "") + (job.error ? "\n[error]\n" + job.error : ""))}</pre>
+        </div>
+      `).join("") || '<div class="muted">暂无任务。</div>';
+    }
+    $("regenIds").onclick = regenIds;
+    ["storyId", "taskId", "outputPath", "file1", "file2", "file3", "stateEdit", "authorSeed", "objective"].forEach((id) => {
+      $(id).addEventListener("input", renderSteps);
+    });
+    regenIds();
+    loadJobs();
+    setInterval(loadJobs, 4000);
+  </script>
+</body>
+</html>

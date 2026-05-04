@@ -7,6 +7,7 @@ from typing import Protocol
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from narrative_state_engine.task_scope import normalize_task_id
 
 
 class BatchEmbeddingProvider(Protocol):
@@ -38,18 +39,21 @@ class EmbeddingBackfillService:
         self.model = model or os.getenv("NOVEL_AGENT_EMBEDDING_MODEL") or "Qwen/Qwen3-Embedding-4B"
         self.batch_size = max(int(batch_size), 1)
 
-    def backfill_story(self, story_id: str, *, limit: int = 200) -> list[BackfillResult]:
+    def backfill_story(self, story_id: str, *, task_id: str = "", limit: int = 200) -> list[BackfillResult]:
+        task_id = normalize_task_id(task_id, story_id)
         return [
             self._backfill_table(
                 table="source_chunks",
                 id_column="chunk_id",
                 story_id=story_id,
+                task_id=task_id,
                 limit=limit,
             ),
             self._backfill_table(
                 table="narrative_evidence_index",
                 id_column="evidence_id",
                 story_id=story_id,
+                task_id=task_id,
                 limit=limit,
             ),
         ]
@@ -60,6 +64,7 @@ class EmbeddingBackfillService:
         table: str,
         id_column: str,
         story_id: str,
+        task_id: str,
         limit: int,
     ) -> BackfillResult:
         updated = 0
@@ -72,13 +77,14 @@ class EmbeddingBackfillService:
                         f"""
                         SELECT {id_column} AS row_id, text
                         FROM {table}
-                        WHERE story_id = :story_id
+                        WHERE task_id = :task_id
+                          AND story_id = :story_id
                           AND (embedding_status = 'pending' OR embedding IS NULL)
                         ORDER BY {id_column}
                         LIMIT :limit
                         """
                     ),
-                    {"story_id": story_id, "limit": batch_limit},
+                    {"task_id": task_id, "story_id": story_id, "limit": batch_limit},
                 ).mappings().all()
             if not rows:
                 break
@@ -101,11 +107,12 @@ class EmbeddingBackfillService:
                     f"""
                     SELECT COUNT(*)
                     FROM {table}
-                    WHERE story_id = :story_id
+                    WHERE task_id = :task_id
+                      AND story_id = :story_id
                       AND (embedding_status = 'pending' OR embedding IS NULL)
                     """
                 ),
-                {"story_id": story_id},
+                {"task_id": task_id, "story_id": story_id},
             ).scalar_one()
         return BackfillResult(table=table, updated_count=updated, pending_count=int(pending))
 

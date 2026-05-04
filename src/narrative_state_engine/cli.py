@@ -2,33 +2,58 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
+import uuid
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from sqlalchemy import create_engine, text
 
-from narrative_state_engine.application import NovelContinuationService
-from narrative_state_engine.analysis import LLMNovelAnalyzer, NovelTextAnalyzer
+from narrative_state_engine.application import NovelContinuationService, ProposalApplier
+from narrative_state_engine.analysis import (
+    AnalysisRunResult,
+    ChapterAnalysisState,
+    EventStyleCaseAsset,
+    GlobalStoryAnalysisState,
+    LLMNovelAnalyzer,
+    NovelTextAnalyzer,
+    StoryBibleAsset,
+    StyleSnippetAsset,
+)
+from narrative_state_engine.bootstrap import apply_analysis_to_state
 from narrative_state_engine.config import load_project_env
 from narrative_state_engine.domain.llm_planning import LLMAuthorPlanningEngine
 from narrative_state_engine.domain.planning import AuthorPlanningEngine
+from narrative_state_engine.domain.state_editing import StateEditEngine
 from narrative_state_engine.embedding.batcher import EmbeddingBackfillService
 from narrative_state_engine.embedding.client import HTTPEmbeddingProvider, HTTPReranker
 from narrative_state_engine.embedding.remote_service import RemoteEmbeddingServiceConfig, RemoteEmbeddingServiceManager
 from narrative_state_engine.graph.nodes import RuleBasedInformationExtractor, TemplateDraftGenerator
 from narrative_state_engine.ingestion import TxtIngestionPipeline
+from narrative_state_engine.ingestion.generated_indexer import GeneratedContentIndexer
 from narrative_state_engine.logging import get_llm_interaction_log_path, init_logging
 from narrative_state_engine.logging.context import new_request_id, set_actor, set_story_id, set_thread_id
 from narrative_state_engine.models import NovelAgentState
 from narrative_state_engine.retrieval.hybrid_search import HybridSearchService
+from narrative_state_engine.state_identity import scope_bootstrap_state_to_story
 from narrative_state_engine.storage.repository import build_story_state_repository
+from narrative_state_engine.storage.branches import ContinuationBranchStore, branch_state
+from narrative_state_engine.task_scope import normalize_task_id, scoped_storage_id
 
 app = typer.Typer(no_args_is_help=True)
 console = Console()
 load_project_env()
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)) or default)
+    except (TypeError, ValueError):
+        return default
 
 
 @app.command()
@@ -76,7 +101,7 @@ def continue_story(
 ) -> None:
     init_logging()
     state = NovelAgentState.demo(prompt)
-    state.story.story_id = story_id
+    scope_bootstrap_state_to_story(state, story_id)
     state.story.title = title or story_id
     if objective:
         state.chapter.objective = objective
@@ -134,20 +159,47 @@ def generate_chapter(
     min_paragraphs: int = typer.Option(4, "--min-paragraphs", min=1, help="Minimum final chapter paragraphs."),
     template: bool = typer.Option(False, "--template", help="Use template generator instead of configured LLM."),
     persist: bool = typer.Option(True, "--persist/--no-persist", help="Persist committed state and generated content."),
+    branch_mode: str = typer.Option("draft", "--branch-mode", help="draft saves a continuation branch; mainline keeps legacy direct commit."),
+    base_version: int = typer.Option(0, "--base-version", min=0, help="Mainline state version to use as generation base."),
+    continue_from_branch: str = typer.Option("", "--continue-from-branch", help="Use an existing draft branch as the generation base."),
     rag: bool = typer.Option(True, "--rag/--no-rag", help="Use configured pipeline RAG retrieval."),
     model: str = typer.Option("", "--model", help="Override LLM model name."),
     database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
 ) -> None:
     init_logging()
-    repository = build_story_state_repository(_database_url(database_url), auto_init_schema=True)
-    state = repository.get(story_id) or NovelAgentState.demo(prompt)
+    task_id = normalize_task_id(task_id, story_id)
+    db_url = _database_url(database_url)
+    repository = build_story_state_repository(db_url, auto_init_schema=True)
+    branch_store = ContinuationBranchStore(database_url=db_url)
+    branch_mode = branch_mode.strip().lower()
+    if branch_mode not in {"draft", "mainline"}:
+        raise typer.BadParameter("--branch-mode must be draft or mainline")
+    parent_branch_id = ""
+    if continue_from_branch:
+        parent_branch = branch_store.get_branch(continue_from_branch)
+        if parent_branch is None:
+            raise typer.BadParameter(f"branch not found: {continue_from_branch}")
+        state = branch_state(parent_branch)
+        parent_branch_id = parent_branch.branch_id
+    elif base_version:
+        state = repository.get_by_version(story_id, base_version, task_id=task_id)
+        if state is None:
+            raise typer.BadParameter(f"state version not found: {story_id} v{base_version}")
+    else:
+        state = repository.get(story_id, task_id=task_id)
+        if state is None:
+            state = scope_bootstrap_state_to_story(NovelAgentState.demo(prompt), story_id)
     state.story.story_id = story_id
     state.thread.user_input = prompt
     state.thread.request_id = new_request_id()
     if objective:
         state.chapter.objective = objective
-    if task_id:
-        state.metadata["task_id"] = task_id
+    state.metadata["task_id"] = task_id
+    state.metadata["continuity_anchor_pack"] = _build_continuity_anchor_pack(
+        database_url=db_url,
+        state=state,
+        parent_branch_id=parent_branch_id,
+    )
     set_actor("cli")
     set_thread_id(state.thread.thread_id)
     set_story_id(state.story.story_id)
@@ -159,7 +211,9 @@ def generate_chapter(
         os.environ["NOVEL_AGENT_ENABLE_PIPELINE_RAG"] = "1"
     else:
         os.environ["NOVEL_AGENT_ENABLE_PIPELINE_RAG"] = "0"
-    if not persist:
+    direct_mainline = branch_mode == "mainline"
+    pipeline_persist = bool(persist and direct_mainline)
+    if not pipeline_persist:
         os.environ["NOVEL_AGENT_AUTO_INDEX_GENERATED_CONTENT"] = "0"
         os.environ["NOVEL_AGENT_AUTO_EMBED_GENERATED_CONTENT"] = "0"
     try:
@@ -173,20 +227,68 @@ def generate_chapter(
             max_rounds=rounds,
             min_chars=min_chars,
             min_paragraphs=min_paragraphs,
-            persist=persist,
+            persist=pipeline_persist,
             llm_model_name=model or None,
         )
     finally:
         _restore_env("NOVEL_AGENT_ENABLE_PIPELINE_RAG", previous_rag)
-        if not persist:
+        if not pipeline_persist:
             _restore_env("NOVEL_AGENT_AUTO_INDEX_GENERATED_CONTENT", previous_auto_index)
             _restore_env("NOVEL_AGENT_AUTO_EMBED_GENERATED_CONTENT", previous_auto_embed)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(result.final_chapter_text, encoding="utf-8")
+    branch_id = ""
+    if persist and branch_mode == "draft":
+        branch_id = scoped_storage_id("branch", task_id, story_id, uuid.uuid4().hex[:12])
+        branch_state_snapshot = result.state.model_copy(deep=True)
+        branch_state_snapshot.chapter.content = result.final_chapter_text
+        branch_state_snapshot.metadata["draft_branch_id"] = branch_id
+        branch_state_snapshot.metadata["branch_mode"] = "draft"
+        branch_state_snapshot.metadata["output_path"] = str(output)
+        branch_state_snapshot.metadata["parent_branch_id"] = parent_branch_id
+        branch_state_snapshot.metadata["base_state_version_no"] = int(
+            state.metadata.get("state_version_no", base_version or 0) or 0
+        ) or None
+        branch_store.save_branch(
+            branch_id=branch_id,
+            story_id=story_id,
+            task_id=task_id,
+            base_state_version_no=branch_state_snapshot.metadata.get("base_state_version_no"),
+            parent_branch_id=parent_branch_id,
+            status="draft",
+            output_path=str(output),
+            chapter_number=branch_state_snapshot.chapter.chapter_number,
+            draft_text=result.final_chapter_text,
+            state=branch_state_snapshot,
+            author_plan_snapshot=_author_plan_snapshot(branch_state_snapshot),
+            retrieval_context=branch_state_snapshot.metadata.get("retrieval_context", {}),
+            extracted_state_changes=[item.model_dump(mode="json") for item in branch_state_snapshot.thread.pending_changes],
+            validation_report={
+                "validation": branch_state_snapshot.validation.model_dump(mode="json"),
+                "commit": branch_state_snapshot.commit.model_dump(mode="json"),
+                "chapter_completed": result.chapter_completed,
+                "rounds_executed": result.rounds_executed,
+            },
+            metadata={
+                "task_id": task_id,
+                "continuity_anchor_pack": branch_state_snapshot.metadata.get("continuity_anchor_pack", {}),
+            },
+        )
+        _index_branch_draft(
+            database_url=db_url,
+            state=branch_state_snapshot,
+            branch_id=branch_id,
+            branch_status="draft",
+            output_path=str(output),
+            draft_text=result.final_chapter_text,
+        )
     payload = {
         "story_id": story_id,
-        "task_id": task_id or state.metadata.get("task_id", ""),
+        "task_id": task_id,
+        "branch_mode": branch_mode,
+        "branch_id": branch_id,
+        "parent_branch_id": parent_branch_id,
         "output": str(output),
         "persisted": result.persisted,
         "chapter_completed": result.chapter_completed,
@@ -203,8 +305,7 @@ def author_plan_debug(
     story_id: str = typer.Option("shared_world_series", "--story-id", help="Story id for proposal context."),
     confirm: bool = typer.Option(False, "--confirm", help="Promote the proposal into confirmed author plan in this demo state."),
 ) -> None:
-    state = NovelAgentState.demo(author_input)
-    state.story.story_id = story_id
+    state = scope_bootstrap_state_to_story(NovelAgentState.demo(author_input), story_id)
     proposal = AuthorPlanningEngine().propose(state, author_input)
     confirmed = None
     if confirm:
@@ -228,9 +329,164 @@ def author_plan_debug(
     console.print(Panel(_console_safe(json.dumps(payload, ensure_ascii=False, indent=2)), title="Author Plan Debug"))
 
 
+@app.command("create-state")
+def create_state(
+    description: str = typer.Argument(..., help="Natural-language description for a new story state."),
+    story_id: str = typer.Option(..., "--story-id", help="Story id to create or replace."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
+    title: str = typer.Option("", "--title", help="Story title. Defaults to story id."),
+    chapter_number: int = typer.Option(1, "--chapter-number", min=1, help="Initial chapter number."),
+    persist: bool = typer.Option(True, "--persist/--no-persist", help="Persist created state."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    task_id = normalize_task_id(task_id, story_id)
+    state = scope_bootstrap_state_to_story(NovelAgentState.demo(description), story_id)
+    state.metadata["task_id"] = task_id
+    state.story.title = title or story_id
+    state.story.premise = description
+    state.chapter.chapter_number = chapter_number
+    state.chapter.chapter_id = f"{story_id}-chapter-{chapter_number:03d}"
+    state.chapter.objective = description
+    proposal = StateEditEngine().propose(state, description)
+    confirmed = StateEditEngine().confirm(state, proposal)
+    state.metadata["creation_mode"] = "from_author_description"
+    state.metadata["initial_state_edit_proposal_id"] = confirmed.proposal_id
+    if persist:
+        repository = build_story_state_repository(_database_url(database_url), auto_init_schema=True)
+        repository.save(state)
+    payload = {
+        "story_id": story_id,
+        "task_id": task_id,
+        "title": state.story.title,
+        "persisted": bool(persist),
+        "proposal_id": confirmed.proposal_id,
+        "operation_count": len(confirmed.operations),
+        "state_version_no": state.metadata.get("state_version_no"),
+        "domain_counts": _domain_counts(state),
+    }
+    console.print(Panel(_console_safe(json.dumps(payload, ensure_ascii=False, indent=2)), title="Create State"))
+
+
+def _repository_call_with_task(method: Any, story_id: str, *, task_id: str, **kwargs: Any) -> Any:
+    try:
+        return method(story_id, task_id=task_id, **kwargs)
+    except TypeError as exc:
+        if "task_id" not in str(exc):
+            raise
+        return method(story_id, **kwargs)
+
+
+def _latest_analysis_result_from_repository(repository: Any, *, story_id: str, task_id: str) -> AnalysisRunResult | None:
+    run = _repository_call_with_task(repository.load_analysis_run, story_id, task_id=task_id)
+    bible_payload = _repository_call_with_task(repository.load_latest_story_bible, story_id, task_id=task_id)
+    if not run or not bible_payload:
+        return None
+
+    summary = dict(run.get("result_summary") or run.get("summary") or {})
+    bible_snapshot = (
+        bible_payload.get("bible_snapshot")
+        or bible_payload.get("snapshot")
+        or summary.get("story_bible_snapshot")
+        or {}
+    )
+    global_payload = summary.get("global_story_state") or {}
+    chapter_rows = summary.get("chapter_states") or run.get("chapter_states") or []
+    snippet_rows = _repository_call_with_task(
+        repository.load_style_snippets,
+        story_id,
+        task_id=task_id,
+        limit=200,
+    )
+    event_rows = _repository_call_with_task(
+        repository.load_event_style_cases,
+        story_id,
+        task_id=task_id,
+        limit=80,
+    )
+
+    return AnalysisRunResult(
+        analysis_version=str(run.get("analysis_version") or bible_payload.get("analysis_version") or ""),
+        story_id=story_id,
+        story_title=str(summary.get("title") or summary.get("story_title") or story_id),
+        chapter_states=[ChapterAnalysisState.model_validate(item) for item in chapter_rows if isinstance(item, dict)],
+        global_story_state=GlobalStoryAnalysisState.model_validate(global_payload) if isinstance(global_payload, dict) and global_payload else None,
+        snippet_bank=[StyleSnippetAsset.model_validate(item) for item in snippet_rows if isinstance(item, dict)],
+        event_style_cases=[EventStyleCaseAsset.model_validate(item) for item in event_rows if isinstance(item, dict)],
+        story_bible=StoryBibleAsset.model_validate(bible_snapshot),
+        story_synopsis=str(summary.get("story_synopsis") or bible_payload.get("story_synopsis") or ""),
+        analysis_state=dict(run.get("analysis_state") or {}),
+        coverage=dict(summary.get("coverage") or bible_payload.get("coverage") or {}),
+        summary=summary,
+    )
+
+
+def _sync_latest_analysis_into_state(
+    *,
+    repository: Any,
+    state: NovelAgentState,
+    story_id: str,
+    task_id: str,
+) -> bool:
+    analysis = _latest_analysis_result_from_repository(repository, story_id=story_id, task_id=task_id)
+    if analysis is None:
+        return False
+    apply_analysis_to_state(state, analysis)
+    state.metadata["task_id"] = task_id
+    state.metadata["analysis_synced_into_state"] = {
+        "analysis_version": analysis.analysis_version,
+        "story_bible_character_count": len(analysis.story_bible.character_cards),
+        "story_bible_plot_thread_count": len(analysis.story_bible.plot_threads),
+    }
+    return True
+
+
+@app.command("edit-state")
+def edit_state(
+    author_input: str = typer.Argument(..., help="Natural-language state edit."),
+    story_id: str = typer.Option(..., "--story-id", help="Story id to edit."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
+    confirm: bool = typer.Option(False, "--confirm", help="Apply the edit and persist it."),
+    persist: bool = typer.Option(True, "--persist/--no-persist", help="Persist confirmed edit."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    task_id = normalize_task_id(task_id, story_id)
+    repository = build_story_state_repository(_database_url(database_url), auto_init_schema=True)
+    state = repository.get(story_id, task_id=task_id)
+    if state is None:
+        raise typer.BadParameter(f"story state not found: {story_id}")
+    synced_analysis = _sync_latest_analysis_into_state(
+        repository=repository,
+        state=state,
+        story_id=story_id,
+        task_id=task_id,
+    )
+    engine = StateEditEngine()
+    proposal = engine.propose(state, author_input)
+    confirmed = None
+    if confirm:
+        confirmed = engine.confirm(state, proposal)
+        if persist:
+            repository.save(state)
+    result = confirmed or proposal
+    payload = {
+        "story_id": story_id,
+        "task_id": task_id,
+        "status": result.status,
+        "proposal_id": result.proposal_id,
+        "persisted": bool(confirm and persist),
+        "operations": [item.model_dump(mode="json") for item in result.operations],
+        "diff": result.diff,
+        "domain_counts": _domain_counts(state),
+        "analysis_synced": synced_analysis,
+    }
+    console.print(Panel(_console_safe(json.dumps(payload, ensure_ascii=False, indent=2)), title="Edit State"))
+
+
 @app.command("author-session")
 def author_session(
     story_id: str = typer.Option("shared_world_series", "--story-id", help="Story id to update."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
+    branch_id: str = typer.Option("", "--branch-id", help="Optional draft branch to revise with this author dialogue."),
     seed: str = typer.Option("", "--seed", help="Initial author idea. If empty, prompt interactively."),
     answer: list[str] = typer.Option(None, "--answer", help="Non-interactive answer to generated clarification questions."),
     persist: bool = typer.Option(True, "--persist/--no-persist", help="Save confirmed author plan into the story state repository."),
@@ -240,9 +496,21 @@ def author_session(
     retrieval_limit: int = typer.Option(12, "--retrieval-limit", min=1, max=40, help="Author-dialogue RAG evidence limit."),
     database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
 ) -> None:
-    repository = build_story_state_repository(_database_url(database_url), auto_init_schema=True)
-    state = repository.get(story_id) or NovelAgentState.demo(seed or "继续下一章。")
+    task_id = normalize_task_id(task_id, story_id)
+    db_url = _database_url(database_url)
+    repository = build_story_state_repository(db_url, auto_init_schema=True)
+    branch_store = ContinuationBranchStore(database_url=db_url)
+    branch = branch_store.get_branch(branch_id) if branch_id else None
+    if branch_id and branch is None:
+        raise typer.BadParameter(f"branch not found: {branch_id}")
+    if branch:
+        state = branch_state(branch)
+    else:
+        state = repository.get(story_id, task_id=task_id)
+        if state is None:
+            state = scope_bootstrap_state_to_story(NovelAgentState.demo(seed or "继续下一章。"), story_id)
     state.story.story_id = story_id
+    state.metadata["task_id"] = task_id
     state.story.title = state.story.title or story_id
 
     author_input = seed.strip() or console.input("作者初始想法/大纲> ").strip()
@@ -253,7 +521,7 @@ def author_session(
         _attach_author_dialogue_rag_context(
             state=state,
             author_input=author_input,
-            database_url=_database_url(database_url),
+            database_url=db_url,
             limit=retrieval_limit,
         )
 
@@ -278,11 +546,38 @@ def author_session(
     confirmed = None
     if confirm:
         confirmed = engine.confirm(state, proposal_id=proposal.proposal_id)
-    if persist:
+    if persist and branch is not None:
+        branch_store.save_branch(
+            branch_id=branch.branch_id,
+            story_id=story_id,
+            task_id=task_id,
+            base_state_version_no=branch.base_state_version_no,
+            parent_branch_id=branch.parent_branch_id,
+            status="revised",
+            output_path=branch.output_path,
+            chapter_number=branch.chapter_number,
+            draft_text=branch.draft_text,
+            state=state,
+            author_plan_snapshot=_author_plan_snapshot(state),
+            retrieval_context=state.metadata.get("author_dialogue_retrieval_context", {}),
+            extracted_state_changes=branch.extracted_state_changes,
+            validation_report=branch.validation_report,
+            metadata={**branch.metadata, "revised_by_author_session": True},
+        )
+        branch_store.set_generated_branch_status(
+            story_id=story_id,
+            task_id=task_id,
+            branch_id=branch.branch_id,
+            status="revised",
+            canonical=False,
+        )
+    elif persist:
         repository.save(state)
 
     payload = {
         "story_id": story_id,
+        "task_id": task_id,
+        "branch_id": branch_id,
         "persisted": bool(persist),
         "llm": bool(llm),
         "proposal_id": proposal.proposal_id,
@@ -297,6 +592,107 @@ def author_session(
         "confirmed_constraints": [item.model_dump(mode="json") for item in state.domain.author_constraints],
     }
     console.print(Panel(_console_safe(json.dumps(payload, ensure_ascii=False, indent=2)), title="Author Session"))
+
+
+@app.command("branch-status")
+def branch_status(
+    story_id: str = typer.Option(..., "--story-id", help="Story id to inspect."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
+    limit: int = typer.Option(30, "--limit", min=1, max=200, help="Number of branches to show."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    task_id = normalize_task_id(task_id, story_id)
+    db_url = _database_url(database_url)
+    build_story_state_repository(db_url, auto_init_schema=True)
+    store = ContinuationBranchStore(database_url=db_url)
+    branches = store.list_branches(story_id, task_id=task_id, limit=limit)
+    payload = {
+        "story_id": story_id,
+        "task_id": task_id,
+        "branches": [
+            {
+                "branch_id": item.branch_id,
+                "status": item.status,
+                "base_state_version_no": item.base_state_version_no,
+                "parent_branch_id": item.parent_branch_id,
+                "chapter_number": item.chapter_number,
+                "chars": len(item.draft_text.strip()),
+                "output_path": item.output_path,
+                "created_at": item.created_at,
+                "updated_at": item.updated_at,
+                "metadata": item.metadata,
+            }
+            for item in branches
+        ],
+    }
+    console.print(Panel(_console_safe(json.dumps(payload, ensure_ascii=False, indent=2)), title="Branch Status"))
+
+
+@app.command("accept-branch")
+def accept_branch(
+    story_id: str = typer.Option(..., "--story-id", help="Story id to update."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
+    branch_id: str = typer.Option(..., "--branch-id", help="Draft branch id to accept."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    task_id = normalize_task_id(task_id, story_id)
+    db_url = _database_url(database_url)
+    repository = build_story_state_repository(db_url, auto_init_schema=True)
+    store = ContinuationBranchStore(database_url=db_url)
+    branch = store.get_branch(branch_id)
+    if branch is None or branch.story_id != story_id:
+        raise typer.BadParameter(f"branch not found for story: {branch_id}")
+    if branch.status == "accepted":
+        raise typer.BadParameter(f"branch is already accepted: {branch_id}")
+    if branch.status == "rejected":
+        raise typer.BadParameter(f"branch is rejected and cannot be accepted: {branch_id}")
+    state = branch_state(branch)
+    state.story.story_id = story_id
+    state.metadata["task_id"] = task_id
+    state.draft.content = branch.draft_text
+    state.chapter.content = branch.draft_text
+    if _status_value(state.commit.status) == "committed":
+        state = ProposalApplier().apply(state)
+        state.chapter.content = branch.draft_text
+    repository.save(state)
+    store.update_status(branch_id, "accepted", metadata_patch={"accepted_state_version_no": state.metadata.get("state_version_no")})
+    store.set_generated_branch_status(story_id=story_id, task_id=task_id, branch_id=branch_id, status="accepted", canonical=True)
+    payload = {
+        "story_id": story_id,
+        "task_id": task_id,
+        "branch_id": branch_id,
+        "status": "accepted",
+        "state_version_no": state.metadata.get("state_version_no"),
+        "chapter_number": state.chapter.chapter_number,
+        "chars": len(branch.draft_text.strip()),
+    }
+    console.print(Panel(_console_safe(json.dumps(payload, ensure_ascii=False, indent=2)), title="Accept Branch"))
+
+
+@app.command("reject-branch")
+def reject_branch(
+    story_id: str = typer.Option(..., "--story-id", help="Story id to update."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
+    branch_id: str = typer.Option(..., "--branch-id", help="Draft branch id to reject."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    task_id = normalize_task_id(task_id, story_id)
+    db_url = _database_url(database_url)
+    build_story_state_repository(db_url, auto_init_schema=True)
+    store = ContinuationBranchStore(database_url=db_url)
+    branch = store.get_branch(branch_id)
+    if branch is None or branch.story_id != story_id:
+        raise typer.BadParameter(f"branch not found for story: {branch_id}")
+    store.update_status(branch_id, "rejected")
+    store.set_generated_branch_status(story_id=story_id, task_id=task_id, branch_id=branch_id, status="rejected", canonical=False)
+    payload = {
+        "story_id": story_id,
+        "task_id": task_id,
+        "branch_id": branch_id,
+        "status": "rejected",
+        "chars": len(branch.draft_text.strip()),
+    }
+    console.print(Panel(_console_safe(json.dumps(payload, ensure_ascii=False, indent=2)), title="Reject Branch"))
 
 
 @app.command("story-status")
@@ -379,49 +775,131 @@ def analyze_task(
     title: str = typer.Option("", "--title", help="Story title. Defaults to file stem."),
     source_type: str = typer.Option("target_continuation", "--source-type", help="Task source type."),
     llm: bool = typer.Option(False, "--llm/--rule", help="Use LLM-assisted analysis or rule analysis."),
-    max_chunk_chars: int = typer.Option(1800, "--max-chunk-chars", min=400, help="Analysis chunk size."),
+    max_chunk_chars: int = typer.Option(
+        _env_int("NOVEL_AGENT_ANALYSIS_TARGET_CHARS", _env_int("NOVEL_AGENT_ANALYSIS_MAX_CHUNK_CHARS", 10000)),
+        "--max-chunk-chars",
+        min=400,
+        help="Soft analysis chunk budget. Natural chapter/paragraph boundaries are preferred.",
+    ),
+    overlap_chars: int = typer.Option(
+        _env_int("NOVEL_AGENT_ANALYSIS_CHUNK_OVERLAP_CHARS", 800),
+        "--overlap-chars",
+        min=0,
+        help="Analysis chunk overlap in characters.",
+    ),
     llm_max_chunks: int = typer.Option(0, "--llm-max-chunks", min=0, help="Optional cap for LLM analyzed chunks."),
     llm_concurrency: int = typer.Option(1, "--llm-concurrency", min=1, max=8, help="Concurrent chunk-level LLM calls. Default keeps stable serial behavior."),
     persist: bool = typer.Option(True, "--persist/--no-persist", help="Save analysis assets into repository."),
     output: Path | None = typer.Option(None, "--output", help="Optional analysis JSON output path."),
+    cache_dir: Path = typer.Option(Path("novels_output/analysis_cache"), "--cache-dir", help="Directory for automatic analysis JSON cache."),
     database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
 ) -> None:
+    task_id = normalize_task_id(task_id, story_id)
+    db_url = _database_url(database_url) if persist else ""
+    if persist:
+        _ensure_database_available(db_url, label="before LLM analysis")
     text_value = _read_text_file(file)
     analyzer = (
         LLMNovelAnalyzer(
-            task_id=task_id or story_id,
+            task_id=task_id,
             source_type=source_type,
             max_chunk_chars=max_chunk_chars,
+            overlap_chars=overlap_chars,
             max_chunks=(llm_max_chunks if llm_max_chunks > 0 else None),
             chunk_concurrency=llm_concurrency,
         )
         if llm
-        else NovelTextAnalyzer(max_chunk_chars=max_chunk_chars)
+        else NovelTextAnalyzer(max_chunk_chars=max_chunk_chars, overlap_chars=overlap_chars)
     )
     analysis = analyzer.analyze(
         source_text=text_value,
         story_id=story_id,
         story_title=title or file.stem,
     )
-    if persist:
-        repository = build_story_state_repository(_database_url(database_url), auto_init_schema=True)
-        repository.save_analysis_assets(analysis)
+    analysis.summary["task_id"] = task_id
     payload = analysis.model_dump(mode="json")
+    cache_path = _analysis_cache_path(
+        cache_dir=cache_dir,
+        task_id=task_id,
+        story_id=story_id,
+        analysis_version=analysis.analysis_version,
+    )
+    _write_json_file(cache_path, payload)
     if output is not None:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_json_file(output, payload)
+    persisted = False
+    if persist:
+        try:
+            _ensure_database_available(db_url, label="before saving analysis")
+            repository = build_story_state_repository(db_url, auto_init_schema=True)
+            repository.save_analysis_assets(analysis)
+            persisted = True
+        except Exception as exc:
+            console.print(
+                Panel(
+                    _console_safe(
+                        json.dumps(
+                            {
+                                "status": "analysis_cached_but_not_persisted",
+                                "reason": str(exc),
+                                "cache_path": str(cache_path),
+                                "retry_command": (
+                                    "python -m narrative_state_engine.cli import-analysis-json "
+                                    f"--file {cache_path} --story-id {story_id} --task-id {task_id}"
+                                ),
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                    ),
+                    title="Analyze Task Persistence Failed",
+                )
+            )
+            raise
     summary = {
-        "task_id": task_id or story_id,
+        "task_id": task_id,
         "story_id": story_id,
         "source_type": source_type,
         "llm": bool(llm),
         "llm_concurrency": llm_concurrency if llm else 0,
-        "persisted": bool(persist),
+        "persisted": persisted,
         "analysis_version": analysis.analysis_version,
         "summary": analysis.summary,
         "output": str(output) if output else "",
+        "cache_path": str(cache_path),
     }
     console.print(Panel(_console_safe(json.dumps(summary, ensure_ascii=False, indent=2)), title="Analyze Task"))
+
+
+@app.command("import-analysis-json")
+def import_analysis_json(
+    file: Path = typer.Option(..., "--file", exists=True, file_okay=True, dir_okay=False, help="Cached AnalysisRunResult JSON file."),
+    story_id: str = typer.Option("", "--story-id", help="Override story id."),
+    task_id: str = typer.Option("", "--task-id", help="Override task id."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    payload = json.loads(file.read_text(encoding="utf-8"))
+    if story_id:
+        payload["story_id"] = story_id
+    task_id = normalize_task_id(task_id or (payload.get("summary") or {}).get("task_id"), payload.get("story_id", ""))
+    payload.setdefault("summary", {})
+    payload["summary"]["task_id"] = task_id
+    analysis = AnalysisRunResult.model_validate(payload)
+    db_url = _database_url(database_url)
+    _ensure_database_available(db_url, label="before importing analysis JSON")
+    repository = build_story_state_repository(db_url, auto_init_schema=True)
+    repository.save_analysis_assets(analysis)
+    summary = {
+        "status": "imported",
+        "file": str(file),
+        "story_id": analysis.story_id,
+        "task_id": task_id,
+        "analysis_version": analysis.analysis_version,
+        "snippet_count": len(analysis.snippet_bank),
+        "case_count": len(analysis.event_style_cases),
+        "chapter_count": len(analysis.chapter_states),
+    }
+    console.print(Panel(_console_safe(json.dumps(summary, ensure_ascii=False, indent=2)), title="Import Analysis JSON"))
 
 
 @app.command()
@@ -519,10 +997,21 @@ def ingest_txt(
     author: str = typer.Option("", "--author", help="Document author."),
     source_type: str = typer.Option("original_novel", "--source-type", help="Source document type."),
     encoding: str = typer.Option("auto", "--encoding", help="auto, utf-8, or gb18030."),
-    target_chars: int = typer.Option(1000, "--target-chars", min=300, help="Target chunk size in characters."),
-    overlap_chars: int = typer.Option(160, "--overlap-chars", min=0, help="Chunk overlap in characters."),
+    target_chars: int = typer.Option(
+        _env_int("NOVEL_AGENT_INGEST_TARGET_CHARS", 1000),
+        "--target-chars",
+        min=300,
+        help="Target chunk size in characters.",
+    ),
+    overlap_chars: int = typer.Option(
+        _env_int("NOVEL_AGENT_INGEST_OVERLAP_CHARS", 160),
+        "--overlap-chars",
+        min=0,
+        help="Chunk overlap in characters.",
+    ),
     database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
 ) -> None:
+    task_id = normalize_task_id(task_id, story_id)
     pipeline = TxtIngestionPipeline(database_url=_database_url(database_url))
     result = pipeline.ingest_txt(
         story_id=story_id,
@@ -530,7 +1019,7 @@ def ingest_txt(
         title=title,
         author=author,
         source_type=source_type,
-        task_id=task_id or story_id,
+        task_id=task_id,
         encoding=encoding,
         target_chars=target_chars,
         overlap_chars=overlap_chars,
@@ -546,6 +1035,7 @@ def ingest_txt(
 @app.command("backfill-embeddings")
 def backfill_embeddings(
     story_id: str = typer.Option(..., "--story-id", help="Story id to backfill."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
     limit: int = typer.Option(200, "--limit", min=1, help="Maximum rows per table."),
     batch_size: int = typer.Option(32, "--batch-size", min=1, help="Embedding batch size."),
     database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
@@ -553,6 +1043,7 @@ def backfill_embeddings(
     on_demand_service: bool = typer.Option(False, "--on-demand-service/--no-on-demand-service", help="SSH start remote embedding service when needed."),
     stop_after: bool = typer.Option(False, "--stop-after/--keep-running", help="Stop remote embedding service after the command."),
 ) -> None:
+    task_id = normalize_task_id(task_id, story_id)
     manager = _remote_manager(embedding_url) if on_demand_service else None
     if manager:
         manager.ensure_running()
@@ -563,7 +1054,7 @@ def backfill_embeddings(
             provider=provider,
             batch_size=batch_size,
         )
-        results = service.backfill_story(story_id, limit=limit)
+        results = service.backfill_story(story_id, task_id=task_id, limit=limit)
     finally:
         if manager and stop_after:
             manager.stop()
@@ -578,6 +1069,7 @@ def backfill_embeddings(
 @app.command("search-debug")
 def search_debug(
     story_id: str = typer.Option(..., "--story-id", help="Story id to search."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
     query: str = typer.Option(..., "--query", help="Search query."),
     character: list[str] = typer.Option(None, "--character", help="Character/entity term."),
     plot_thread: list[str] = typer.Option(None, "--plot-thread", help="Plot thread term."),
@@ -592,6 +1084,7 @@ def search_debug(
     on_demand_service: bool = typer.Option(False, "--on-demand-service/--no-on-demand-service", help="SSH start remote embedding/rerank service when needed."),
     stop_after: bool = typer.Option(False, "--stop-after/--keep-running", help="Stop remote embedding/rerank service after the command."),
 ) -> None:
+    task_id = normalize_task_id(task_id, story_id)
     manager = None
     vector_url_configured = bool(embedding_url or os.getenv("NOVEL_AGENT_VECTOR_STORE_URL"))
     if vector and on_demand_service and vector_url_configured:
@@ -613,6 +1106,7 @@ def search_debug(
         result = service.search(
             story_id=story_id,
             query_text=query,
+            task_id=task_id,
             characters=character or [],
             plot_threads=plot_thread or [],
             evidence_types=evidence_type or [],
@@ -677,11 +1171,178 @@ def web(
         uvicorn.run(create_app(), host=host, port=port)
 
 
+def _author_plan_snapshot(state: NovelAgentState) -> dict:
+    return {
+        "author_plan": state.domain.author_plan.model_dump(mode="json"),
+        "author_constraints": [item.model_dump(mode="json") for item in state.domain.author_constraints],
+        "chapter_blueprints": [item.model_dump(mode="json") for item in state.domain.chapter_blueprints],
+        "confirmed_author_plan_proposal_id": state.metadata.get("confirmed_author_plan_proposal_id", ""),
+        "latest_author_plan_proposal_id": state.metadata.get("latest_author_plan_proposal_id", ""),
+    }
+
+
+def _build_continuity_anchor_pack(
+    *,
+    database_url: str,
+    state: NovelAgentState,
+    parent_branch_id: str = "",
+    tail_chars: int = 1400,
+) -> dict:
+    return {
+        "target_source_tail": _target_source_tail(database_url, state.story.story_id, task_id=normalize_task_id(state.metadata.get("task_id"), state.story.story_id), tail_chars=tail_chars),
+        "current_state": {
+            "chapter_number": state.chapter.chapter_number,
+            "latest_summary": state.chapter.latest_summary,
+            "objective": state.chapter.objective,
+            "open_questions": list(state.chapter.open_questions[:8]),
+            "scene_cards": list(state.chapter.scene_cards[:8]),
+        },
+        "accepted_continuation_tail": _accepted_continuation_tail(database_url, state.story.story_id, task_id=normalize_task_id(state.metadata.get("task_id"), state.story.story_id), tail_chars=tail_chars),
+        "parent_branch_tail": _branch_tail(database_url, parent_branch_id, tail_chars=tail_chars) if parent_branch_id else "",
+        "author_plan_snapshot": _author_plan_snapshot(state),
+    }
+
+
+def _target_source_tail(database_url: str, story_id: str, *, task_id: str, tail_chars: int) -> str:
+    try:
+        engine = create_engine(database_url, future=True)
+        with engine.begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT sc.text
+                    FROM source_chunks sc
+                    JOIN source_documents sd ON sd.document_id = sc.document_id
+                    WHERE sc.task_id = :task_id AND sc.story_id = :story_id AND sd.source_type = 'target_continuation'
+                    ORDER BY COALESCE(sc.chapter_index, 0) DESC, sc.end_offset DESC
+                    LIMIT 1
+                    """
+                ),
+                {"task_id": task_id, "story_id": story_id},
+            ).scalar()
+        return str(row or "").strip()[-tail_chars:]
+    except Exception:
+        return ""
+
+
+def _accepted_continuation_tail(database_url: str, story_id: str, *, task_id: str, tail_chars: int) -> str:
+    try:
+        engine = create_engine(database_url, future=True)
+        with engine.begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT draft_text
+                    FROM continuation_branches
+                    WHERE task_id = :task_id AND story_id = :story_id AND status = 'accepted'
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """
+                ),
+                {"task_id": task_id, "story_id": story_id},
+            ).scalar()
+        return str(row or "").strip()[-tail_chars:]
+    except Exception:
+        return ""
+
+
+def _branch_tail(database_url: str, branch_id: str, *, tail_chars: int) -> str:
+    try:
+        store = ContinuationBranchStore(database_url=database_url)
+        branch = store.get_branch(branch_id)
+        return (branch.draft_text if branch else "").strip()[-tail_chars:]
+    except Exception:
+        return ""
+
+
+def _index_branch_draft(
+    *,
+    database_url: str,
+    state: NovelAgentState,
+    branch_id: str,
+    branch_status: str,
+    output_path: str,
+    draft_text: str,
+) -> None:
+    try:
+        GeneratedContentIndexer(database_url=database_url).index_state_draft(
+            state,
+            content=draft_text,
+            branch_id=branch_id,
+            branch_status=branch_status,
+            canonical=(branch_status == "accepted"),
+            output_path=output_path,
+        )
+    except Exception as exc:
+        state.metadata["branch_generated_index_error"] = str(exc)
+
+
 def _database_url(value: str) -> str:
     url = value or os.getenv("NOVEL_AGENT_DATABASE_URL", "")
     if not url:
         raise typer.BadParameter("database url is required via --database-url or NOVEL_AGENT_DATABASE_URL")
     return url
+
+
+def _analysis_cache_path(*, cache_dir: Path, task_id: str, story_id: str, analysis_version: str) -> Path:
+    safe_task = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in task_id)
+    safe_story = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in story_id)
+    safe_version = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in analysis_version)
+    return cache_dir / f"{safe_task}__{safe_story}__{safe_version}.json"
+
+
+def _write_json_file(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _ensure_database_available(database_url: str, *, label: str = "database check") -> None:
+    try:
+        _probe_database(database_url)
+        return
+    except Exception as first_exc:
+        started = _start_local_pgvector_if_possible(database_url)
+        if started:
+            try:
+                _probe_database(database_url)
+                return
+            except Exception:
+                pass
+        raise typer.BadParameter(
+            f"{label}: database is not reachable. Start it with "
+            f"tools/local_pgvector/start.ps1 and retry. Original error: {first_exc}"
+        ) from first_exc
+
+
+def _probe_database(database_url: str) -> None:
+    engine = create_engine(database_url, future=True, connect_args={"connect_timeout": 3})
+    with engine.begin() as conn:
+        conn.execute(text("SELECT 1")).scalar()
+
+
+def _start_local_pgvector_if_possible(database_url: str) -> bool:
+    if "127.0.0.1:55432" not in database_url and "localhost:55432" not in database_url:
+        return False
+    script = Path(__file__).resolve().parents[2] / "tools" / "local_pgvector" / "start.ps1"
+    if not script.exists():
+        return False
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        text=True,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    return completed.returncode == 0 or "server starting" in completed.stdout.lower()
 
 
 def _attach_author_dialogue_rag_context(
@@ -708,6 +1369,7 @@ def _attach_author_dialogue_rag_context(
         )
         result = service.search(
             story_id=state.story.story_id,
+            task_id=normalize_task_id(state.metadata.get("task_id"), state.story.story_id),
             query_text=query_text,
             characters=_author_dialogue_character_terms(state),
             plot_threads=_author_dialogue_plot_terms(state),
@@ -890,9 +1552,33 @@ def _jsonish(value):
     return value
 
 
+def _domain_counts(state: NovelAgentState) -> dict[str, int]:
+    return {
+        "characters": len(state.domain.characters),
+        "candidate_character_mentions": len(state.domain.candidate_character_mentions),
+        "world_rules": len(state.domain.world_rules),
+        "plot_threads": len(state.domain.plot_threads),
+        "chapter_blueprints": len(state.domain.chapter_blueprints),
+        "style_constraints": len(state.domain.style_constraints),
+        "setting_concepts": (
+            len(state.domain.world_concepts)
+            + len(state.domain.power_systems)
+            + len(state.domain.system_ranks)
+            + len(state.domain.techniques)
+            + len(state.domain.resource_concepts)
+            + len(state.domain.rule_mechanisms)
+            + len(state.domain.terminology)
+        ),
+    }
+
+
 def _console_safe(value: str) -> str:
     encoding = sys.stdout.encoding or "utf-8"
     return value.encode(encoding, errors="replace").decode(encoding, errors="replace")
+
+
+def _status_value(value) -> str:
+    return str(value.value if hasattr(value, "value") else value)
 
 
 def _env_flag(name: str, *, default: bool = False) -> bool:

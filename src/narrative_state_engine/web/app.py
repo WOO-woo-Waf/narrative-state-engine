@@ -31,6 +31,10 @@ def create_app() -> FastAPI:
     def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
 
+    @app.get("/workflow")
+    def workflow() -> FileResponse:
+        return FileResponse(STATIC_DIR / "workflow.html")
+
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         return data.health()
@@ -39,25 +43,33 @@ def create_app() -> FastAPI:
     def stories() -> dict[str, Any]:
         return data.list_stories()
 
+    @app.get("/api/tasks")
+    def tasks() -> dict[str, Any]:
+        return data.list_tasks()
+
     @app.get("/api/stories/{story_id}/overview")
-    def overview(story_id: str) -> dict[str, Any]:
-        return data.overview(story_id)
+    def overview(story_id: str, task_id: str = "") -> dict[str, Any]:
+        return data.overview(story_id, task_id=task_id)
 
     @app.get("/api/stories/{story_id}/analysis")
-    def analysis(story_id: str) -> dict[str, Any]:
-        return data.analysis(story_id)
+    def analysis(story_id: str, task_id: str = "") -> dict[str, Any]:
+        return data.analysis(story_id, task_id=task_id)
 
     @app.get("/api/stories/{story_id}/author-plan")
-    def author_plan(story_id: str) -> dict[str, Any]:
-        return data.author_plan(story_id)
+    def author_plan(story_id: str, task_id: str = "") -> dict[str, Any]:
+        return data.author_plan(story_id, task_id=task_id)
 
     @app.get("/api/stories/{story_id}/retrieval")
-    def retrieval(story_id: str) -> dict[str, Any]:
-        return data.retrieval(story_id)
+    def retrieval(story_id: str, task_id: str = "") -> dict[str, Any]:
+        return data.retrieval(story_id, task_id=task_id)
 
     @app.get("/api/stories/{story_id}/generated")
-    def generated(story_id: str) -> dict[str, Any]:
-        return data.generated(story_id)
+    def generated(story_id: str, task_id: str = "") -> dict[str, Any]:
+        return data.generated(story_id, task_id=task_id)
+
+    @app.get("/api/stories/{story_id}/branches")
+    def branches(story_id: str, task_id: str = "") -> dict[str, Any]:
+        return {"story_id": story_id, "task_id": task_id, "branches": data.generated(story_id, task_id=task_id).get("branches", [])}
 
     @app.post("/api/jobs")
     def submit_job(request: JobRequest) -> dict[str, Any]:

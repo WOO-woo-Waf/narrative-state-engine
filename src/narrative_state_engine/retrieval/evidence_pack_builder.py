@@ -157,6 +157,21 @@ class EvidencePackBuilder:
                 )
             )
 
+        for concept in _setting_concept_rows(state)[:80]:
+            pack.world_evidence.append(
+                NarrativeEvidence(
+                    evidence_id=concept["concept_id"],
+                    evidence_type=f"setting_{concept['concept_type']}",
+                    source="setting_systems",
+                    text=concept["text"],
+                    usage_hint="setting_system_constraint",
+                    related_entities=list(concept.get("related_characters", [])),
+                    score_structural=0.75,
+                    final_score=0.75,
+                    metadata=dict(concept),
+                )
+            )
+
         for edge in state.domain.graph_edges[:80]:
             source_node = _find_graph_node_label(state, edge.source_node_id)
             target_node = _find_graph_node_label(state, edge.target_node_id)
@@ -183,6 +198,7 @@ class EvidencePackBuilder:
                 "scene_case_evidence_count": len(pack.scene_case_evidence),
                 "author_plan_evidence_count": len(pack.author_plan_evidence),
                 "plot_evidence_count": len(pack.plot_evidence),
+                "world_evidence_count": len(pack.world_evidence),
             }
         )
         return pack
@@ -420,3 +436,39 @@ def _find_graph_node_label(state: NovelAgentState, node_id: str) -> str:
         if node.node_id == node_id:
             return node.label or node.node_id
     return node_id
+
+
+def _setting_concept_rows(state: NovelAgentState) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    groups = [
+        *state.domain.world_concepts,
+        *state.domain.power_systems,
+        *state.domain.system_ranks,
+        *state.domain.techniques,
+        *state.domain.resource_concepts,
+        *state.domain.rule_mechanisms,
+        *state.domain.terminology,
+    ]
+    for item in groups:
+        parts = [item.name, item.definition]
+        if item.rules:
+            parts.append("规则:" + " / ".join(item.rules[:3]))
+        if item.limitations:
+            parts.append("限制:" + " / ".join(item.limitations[:3]))
+        text = " ".join(part for part in parts if part).strip()
+        if not text:
+            continue
+        rows.append(
+            {
+                "concept_id": item.concept_id,
+                "concept_type": item.concept_type,
+                "name": item.name,
+                "text": text,
+                "status": item.status,
+                "confidence": item.confidence,
+                "related_characters": list(item.related_characters),
+                "related_concepts": list(item.related_concepts),
+                "author_locked": item.author_locked,
+            }
+        )
+    return rows

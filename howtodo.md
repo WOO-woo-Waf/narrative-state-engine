@@ -67,6 +67,66 @@ pip install -e .[dev]
 
 ---
 
+## 0.1 一键启动、停止、重启工作服务
+
+日常开工时可以直接启动整套工作服务：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/start_workday.ps1
+```
+
+这条脚本会依次启动：
+
+```text
+1. 本地 PostgreSQL + pgvector 数据库
+2. 远端 embedding/rerank 向量检索服务
+3. 本地前端工作台
+```
+
+默认前端访问地址：
+
+```text
+http://127.0.0.1:7860
+```
+
+结束工作时关闭整套服务：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/stop_workday.ps1
+```
+
+这条脚本会依次停止：
+
+```text
+1. 本地前端工作台
+2. 远端 embedding/rerank 向量检索服务
+3. 本地 PostgreSQL + pgvector 数据库
+```
+
+如果只是改了普通 Python 代码，想重新测试前端里的新功能，通常只需要重启前端，不需要动数据库和远端向量服务：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/restart_dev.ps1
+```
+
+这条脚本只会停止并重新启动本地前端工作台。数据库、pgvector、远端 embedding/rerank 服务都会保持运行。
+
+如果你确实想完整重启所有服务，可以加 `-Full`：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/restart_dev.ps1 -Full
+```
+
+如果 7860 端口被占用，可以给三个脚本都指定同一个端口：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/start_workday.ps1 -Port 7861
+powershell -ExecutionPolicy Bypass -File tools/restart_dev.ps1 -Port 7861
+powershell -ExecutionPolicy Bypass -File tools/stop_workday.ps1 -Port 7861
+```
+
+---
+
 ## 1. 确认数据库服务已经可用
 
 你已经启动了数据库服务，所以这里不需要再启动。只需要在要检查时运行：
@@ -649,7 +709,7 @@ python -m narrative_state_engine.cli search-debug `
 
 ```powershell
 python -m narrative_state_engine.cli author-session `
-  --story-id story_123_series `
+  --story-id story_fresh_novel_20260504_103709 `
   --llm
 ```
 
@@ -970,7 +1030,7 @@ LLM 负责“分析、对话规划、生成、抽取新状态”。
 
 ```text
 1. conda activate novel-create
-2. tools/remote_embedding/start.ps1 常驻启动远端 embedding/rerank 服务
+2. tools/start_workday.ps1 一键启动本地数据库、远端 embedding/rerank 服务和前端工作台
 3. ingest-txt 导入 novels_input/1.txt
 4. ingest-txt 导入 novels_input/2.txt
 5. ingest-txt 导入 novels_input/3.txt
@@ -983,15 +1043,25 @@ LLM 负责“分析、对话规划、生成、抽取新状态”。
 12. generate-chapter 生成 novels_output/chapter_001.txt
 13. story-status 检查生成内容和状态是否提交
 14. backfill-embeddings 把生成章节也加入后续检索
+15. tools/stop_workday.ps1 结束工作时关闭前端、远端服务和本地数据库
 ```
 
 之后继续写新章节：
 
 ```text
-1. author-session --llm 更新或补充后续剧情架构
-2. generate-chapter 输出 chapter_002.txt / chapter_003.txt
-3. story-status 检查状态
-4. backfill-embeddings 补新章节向量
+1. tools/start_workday.ps1 一键启动工作服务
+2. author-session --llm 更新或补充后续剧情架构
+3. generate-chapter 输出 chapter_002.txt / chapter_003.txt
+4. story-status 检查状态
+5. backfill-embeddings 补新章节向量
+6. tools/stop_workday.ps1 结束工作时关闭服务
+```
+
+改完普通 Python 代码后重新测试：
+
+```text
+1. tools/restart_dev.ps1 只重启前端工作台
+2. 在 http://127.0.0.1:7860 重新测试新功能
 ```
 
 ---
@@ -1133,11 +1203,188 @@ analyze-task
 backfill-embeddings
 search-debug
 author-session
+create-state
+edit-state
 generate-chapter
+branch-status
+accept-branch
+reject-branch
 ```
 
 相关设计和实现文档：
 
 ```text
 docs/24_local_web_workbench.md
+```
+
+---
+
+## 14.1 前端 `/workflow` 没反应时，直接用 CLI 跑同一套流程
+
+如果浏览器里点“运行这一步”没有明显反应，先看三处：
+
+```text
+浏览器 DevTools Console / Network 里 /api/jobs 是否返回 400 或 500
+页面底部“任务日志”是否有新 job
+logs/web_workbench.err.log 是否有后端异常
+```
+
+前端只是把按钮转换成 `python -m narrative_state_engine.cli ...`。如果你想跳过前端，下面这组命令和 `/workflow` 推荐流程等价。
+
+先设置本轮独立 ID。建议每次新任务换一组，避免和旧测试状态混在一起：
+
+```powershell
+$STAMP = Get-Date -Format "yyyyMMdd_HHmmss"
+$STORY_ID = "story_fresh_novel_$STAMP"
+$TASK_ID = "task_fresh_novel_$STAMP"
+$OUTPUT = "novels_output/${STORY_ID}_chapter_001_preview.txt"
+```
+
+确认环境和服务：
+
+```powershell
+conda activate novel-create
+powershell -ExecutionPolicy Bypass -File tools/local_pgvector/status.ps1
+powershell -ExecutionPolicy Bypass -File tools/remote_embedding/status.ps1
+```
+
+如果数据库或远端向量服务没有运行，先启动：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/local_pgvector/start.ps1
+powershell -ExecutionPolicy Bypass -File tools/remote_embedding/start.ps1
+```
+
+1. 导入主续写文本，写入 `source_documents/source_chunks/narrative_evidence_index`，作为主 canon。这里使用较小的 1000 字左右分块，方便 embedding/RAG 精准召回：
+
+```powershell
+python -m narrative_state_engine.cli ingest-txt `
+  --task-id task_fresh_novel_20260504_103709 `
+  --story-id story_fresh_novel_20260504_103709 `
+  --file novels_input/1.txt `
+  --title target_continuation_1 `
+  --source-type target_continuation `
+  --target-chars 1000 `
+  --overlap-chars 160
+```
+
+2. 导入风格/世界观参考，同样使用较小分块进入向量检索：
+
+```powershell
+python -m narrative_state_engine.cli ingest-txt `
+  --task-id $TASK_ID `
+  --story-id $STORY_ID `
+  --file novels_input/2.txt `
+  --title same_author_world_style_2 `
+  --source-type same_author_world_style `
+  --target-chars 1000 `
+  --overlap-chars 160
+```
+
+3. 导入联动/关系参考，同样使用较小分块进入向量检索：
+
+```powershell
+python -m narrative_state_engine.cli ingest-txt `
+  --task-id $TASK_ID `
+  --story-id $STORY_ID `
+  --file novels_input/3.txt `
+  --title crossover_linkage_3 `
+  --source-type crossover_linkage `
+  --target-chars 1000 `
+  --overlap-chars 160
+```
+
+4. 给原文证据补 embedding：
+
+```powershell
+python -m narrative_state_engine.cli backfill-embeddings `
+  --story-id $STORY_ID `
+  --limit 5000 `
+  --batch-size 16 `
+  --no-on-demand-service `
+  --keep-running
+```
+
+5. 对主续写文本做 LLM 深度分析并保存 NovelStateBible。这里故意使用 10000 字左右的大分析块，保留章节/剧情上下文：
+
+```powershell
+python -m narrative_state_engine.cli analyze-task `
+  --task-id task_fresh_novel_20260504_103709 `
+  --story-id story_fresh_novel_20260504_103709 `
+  --file novels_input/1.txt `
+  --title target_continuation_1 `
+  --source-type target_continuation `
+  --max-chunk-chars 10000 `
+  --overlap-chars 100 `
+  --llm-concurrency 1 `
+  --llm `
+  --persist
+```
+
+6. 给分析产出的结构化证据补 embedding：
+
+```powershell
+python -m narrative_state_engine.cli backfill-embeddings `
+  --story-id $STORY_ID `
+  --limit 5000 `
+  --batch-size 16 `
+  --no-on-demand-service `
+  --keep-running
+```
+
+7. 用自然语言修订并锁定状态：
+
+```powershell
+python -m narrative_state_engine.cli edit-state `
+  "补充设定：把分析出的角色、设定和风格作为候选状态；作者锁定的补充内容优先于自动分析。" `
+  --story-id $STORY_ID `
+  --confirm `
+  --persist
+```
+
+8. 保存作者后续剧情规划：
+
+```powershell
+python -m narrative_state_engine.cli author-session `
+  --story-id $STORY_ID `
+  --seed "下一章在已有小说状态基础上推进主线，保留人物关系张力，场景行动要清晰，结尾留下新的悬念。" `
+  --llm `
+  --rag `
+  --persist `
+  --retrieval-limit 12
+```
+
+9. 生成下一章预览分支，不写回主线：
+
+```powershell
+python -m narrative_state_engine.cli generate-chapter `
+  "按照作者已经确认的剧情结构，结合新的小说状态、检索证据和风格参考，续写下一章。" `
+  --task-id $TASK_ID `
+  --story-id $STORY_ID `
+  --objective "完成下一章正文，严格参考新的小说状态、角色卡、设定体系、检索证据和作者确认的剧情规划。" `
+  --rounds 2 `
+  --min-chars 1200 `
+  --min-paragraphs 4 `
+  --output $OUTPUT `
+  --no-persist `
+  --branch-mode draft `
+  --rag
+```
+
+查看结果和数据库状态：
+
+```powershell
+python -m narrative_state_engine.cli story-status --story-id $STORY_ID
+Get-Content -Path $OUTPUT -Encoding UTF8
+```
+
+如果你想把这次生成作为后续续写材料继续纳入检索，后面再执行一次 embedding 回填：
+
+```powershell
+python -m narrative_state_engine.cli backfill-embeddings `
+  --story-id $STORY_ID `
+  --limit 5000 `
+  --batch-size 16 `
+  --no-on-demand-service `
+  --keep-running
 ```

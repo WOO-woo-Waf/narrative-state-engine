@@ -84,9 +84,12 @@ def build_draft_messages(state: NovelAgentState) -> list[dict[str, str]]:
     segment_plan = state.metadata.get("chapter_segment_plan", {}) or {}
     fragment_tail = _truncate_text(state.metadata.get("chapter_fragment_tail", ""), max_chars=320)
     domain_context = state.metadata.get("domain_context_sections", {}) or {}
+    continuity_anchor_pack = state.metadata.get("continuity_anchor_pack", {}) or {}
+    continuity_anchor_text = _truncate_text(json.dumps(continuity_anchor_pack, ensure_ascii=False), max_chars=1200)
     author_constraints_text = _truncate_text(domain_context.get("author_constraints", ""), max_chars=360)
     compressed_memory_text = _truncate_text(domain_context.get("compressed_memory", ""), max_chars=520)
     domain_character_text = _truncate_text(domain_context.get("character_cards", ""), max_chars=360)
+    setting_systems_text = _truncate_text(domain_context.get("setting_systems", ""), max_chars=700)
     domain_plot_text = _truncate_text(domain_context.get("plot_threads", ""), max_chars=360)
     retrieved_plot_text = _truncate_text(domain_context.get("plot_evidence", ""), max_chars=900)
     retrieved_character_text = _truncate_text(domain_context.get("character_evidence", ""), max_chars=700)
@@ -145,7 +148,9 @@ def build_draft_messages(state: NovelAgentState) -> list[dict[str, str]]:
         f"事件样例: {case_examples_text}\n"
         f"作者约束: {author_constraints_text or '无'}\n"
         f"压缩记忆: {compressed_memory_text or '无'}\n"
+        f"连续性锚点包: {continuity_anchor_text or '无'}\n"
         f"领域角色卡: {domain_character_text or '无'}\n"
+        f"设定体系: {setting_systems_text or '无'}\n"
         f"领域剧情线: {domain_plot_text or '无'}\n"
         f"检索剧情证据: {retrieved_plot_text or '无'}\n"
         f"检索人物证据: {retrieved_character_text or '无'}\n"
@@ -165,6 +170,7 @@ def build_draft_messages(state: NovelAgentState) -> list[dict[str, str]]:
         "3. 若总目标很长，也只完成本轮配额，把悬念留给下一轮。\n"
         "4. continuity_notes 只记录本轮需要保持的连续性约束。\n"
         "5. 若作者约束存在，必须优先满足作者约束，不得触发禁止剧情点。\n"
+        "6. 涉及能力、修炼、等级、术语、资源和代价时，必须遵守设定体系，不要临时发明能绕过限制的新规则。\n"
         f"请按如下 schema 输出 JSON:\n{json.dumps(schema, ensure_ascii=False)}"
     )
     return [

@@ -25,6 +25,12 @@ Open:
 http://127.0.0.1:7860
 ```
 
+The guided fresh-run workflow is available at:
+
+```text
+http://127.0.0.1:7860/workflow
+```
+
 Stop:
 
 ```powershell
@@ -71,6 +77,7 @@ The web dependencies are optional and only required for the workbench.
 - Generated Content: `novels_output/*.txt`, generated continuation database records, latest commit and validation status.
 - Retrieval Evidence: recent `retrieval_runs`, query plans, candidate counts, selected evidence.
 - Jobs: run fixed CLI scenarios and inspect stdout/stderr.
+- Fresh Workflow: generate an isolated task/story id and run the recommended ingest -> embedding -> analysis -> author edit -> author plan -> draft chapter sequence.
 
 ## Allowed Jobs
 
@@ -81,7 +88,12 @@ The browser cannot execute arbitrary shell commands. It can only run these fixed
 - `backfill-embeddings`
 - `search-debug`
 - `author-session`
+- `create-state`
+- `edit-state`
 - `generate-chapter`
+- `branch-status`
+- `accept-branch`
+- `reject-branch`
 
 Input files must be under `novels_input`.
 Generated output files must be `.txt` files under `novels_output`.
@@ -101,5 +113,6 @@ powershell -ExecutionPolicy Bypass -File tools/remote_embedding/start.ps1
 - Read-only data DTOs: `src/narrative_state_engine/web/data.py`
 - Whitelisted job runner: `src/narrative_state_engine/web/jobs.py`
 - Static frontend: `src/narrative_state_engine/web/static/index.html`
+- Guided fresh workflow frontend: `src/narrative_state_engine/web/static/workflow.html`
 
 The first version stores job history in process memory only. Business results remain available from the database and output files after refresh or restart.
