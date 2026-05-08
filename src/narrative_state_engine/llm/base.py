@@ -49,6 +49,13 @@ class BaseLLM:
         input_tokens = self._read_optional_int(usage, "input_tokens")
         output_tokens = self._read_optional_int(usage, "output_tokens")
         total_tokens = self._read_optional_int(usage, "total_tokens")
+        prompt_cache_hit_tokens = self._read_optional_int(usage, "prompt_cache_hit_tokens")
+        prompt_cache_miss_tokens = self._read_optional_int(usage, "prompt_cache_miss_tokens")
+        completion_tokens_details = self._read_optional_data(usage, "completion_tokens_details")
+        completion_reasoning_tokens = self._read_optional_nested_int(
+            completion_tokens_details,
+            "reasoning_tokens",
+        )
 
         if input_tokens is None:
             input_tokens = prompt_tokens
@@ -67,8 +74,11 @@ class BaseLLM:
             "total_tokens": total_tokens,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "prompt_cache_hit_tokens": prompt_cache_hit_tokens,
+            "prompt_cache_miss_tokens": prompt_cache_miss_tokens,
+            "completion_reasoning_tokens": completion_reasoning_tokens,
             "prompt_tokens_details": self._read_optional_data(usage, "prompt_tokens_details"),
-            "completion_tokens_details": self._read_optional_data(usage, "completion_tokens_details"),
+            "completion_tokens_details": completion_tokens_details,
             "input_tokens_details": self._read_optional_data(usage, "input_tokens_details"),
             "output_tokens_details": self._read_optional_data(usage, "output_tokens_details"),
             "usage_raw": usage_raw,
@@ -76,6 +86,17 @@ class BaseLLM:
 
     def _read_optional_int(self, usage: Any, name: str) -> int | None:
         value = self._read_optional_data(usage, name)
+        if value in (None, ""):
+            return None
+        try:
+            return max(int(value), 0)
+        except Exception:
+            return None
+
+    def _read_optional_nested_int(self, data: Any, name: str) -> int | None:
+        if not isinstance(data, dict):
+            return None
+        value = data.get(name)
         if value in (None, ""):
             return None
         try:
