@@ -877,7 +877,46 @@ POST /api/bridge/sillytavern/action
 
 这条线适合以后验证酒馆生态，但主产品仍应先做好自己的 Author Workbench。
 
-如果改走“直接基于 SillyTavern 前端”的路线，bridge 不再只是可选实验，而会变成主集成层。
+如果改走“直接基于 SillyTavern 前端”的路线，bridge 不再只是可选实验，而会变成前端接入层。
+
+这里要避免概念倒置：系统核心仍然是本项目后端，而不是 SillyTavern。
+
+核心链路应保持：
+
+```text
+作者自然语言对话
+  -> 本项目 Agent Runtime 理解意图
+  -> 本项目状态机提供上下文和工具
+  -> 模型生成动作草案或执行规划
+  -> 作者确认高影响动作
+  -> 本项目后端校验并写入权威状态
+  -> 前端展示结果
+```
+
+SillyTavern 前端负责成熟的聊天体验、角色卡/世界书/Prompt Manager 交互和快捷操作；本项目后端负责真实能力：
+
+```text
+分析
+审计
+状态修改
+剧情规划
+续写任务
+分支审稿
+状态回写
+证据链
+状态版本
+```
+
+也就是说，SillyTavern Connector 是 UI 和后端之间的桥，不是新的业务中枢。真正的业务中枢仍是：
+
+```text
+Author State Engine 后端
+NovelScenarioAdapter
+Agent Runtime
+ContextEnvelope / PromptContextSection
+ActionDraft / ToolExecution
+StateObject / StateTransition / Evidence
+```
 
 此时需要设计：
 
@@ -910,6 +949,23 @@ POST /api/bridge/sillytavern/state-edit-drafts
 ```
 
 这样 SillyTavern 前端可以保持自己的成熟交互，而本项目后端继续保持权威状态机。
+
+最重要的产品原则仍然是“对话优先”：
+
+```text
+作者不需要手动理解分析、审计、规划、续写这些内部任务如何串联。
+作者只需要和模型对话。
+模型根据当前上下文主动提出下一步。
+后端把每一步产物落库，并把关键结果交给下一步上下文。
+```
+
+SillyTavern 的成熟界面可以承载这个体验，但不能把体验退回到“作者自己管理角色卡、世界书、prompt 和任务按钮”。我们的目标是：
+
+```text
+像酒馆一样好用、成熟、灵活。
+像 CodeX 一样由对话模型主导任务。
+像状态机一样可审计、可追踪、可回滚。
+```
 
 ## 14. 下一轮执行建议
 

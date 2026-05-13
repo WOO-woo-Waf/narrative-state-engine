@@ -16,6 +16,7 @@ build/
 logs/
 *.log
 *.jsonl
+notebooks/
 novels_output/
 novels_input/
 node_modules/
