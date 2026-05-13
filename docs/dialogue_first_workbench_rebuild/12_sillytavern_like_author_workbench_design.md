@@ -39,6 +39,56 @@ SillyTavern-like UI
 + 可追踪任务链路
 ```
 
+补充原则：作者意志是最高优先级。
+
+这里的“审计”不是限制作者修改，也不是让系统否决作者意图。它的真实职责是：
+
+```text
+把作者意图转成明确、可预览、可追踪、可回滚的状态变更。
+```
+
+作者可以通过对话要求模型修改任何内容：
+
+```text
+角色卡
+世界规则
+力量体系
+剧情线
+关系状态
+伏笔
+风格约束
+作者规划
+续写分支
+状态证据
+```
+
+只要作者明确确认，系统应允许修改。审计层要做的是：
+
+```text
+识别会被修改的对象和字段。
+展示修改前后差异。
+标记风险、冲突和证据缺口。
+提示哪些内容会覆盖既有状态。
+生成状态迁移记录。
+保留作者确认记录。
+必要时支持回滚或生成新分支。
+```
+
+因此优先级应是：
+
+```text
+作者明确指令 > 作者锁定/确认状态 > 当前主线状态 > 证据推断 > 模型推断 > 参考资料
+```
+
+如果作者明确说“按我的设定覆盖”，系统不应以“和原文证据冲突”为理由阻止，只应提示：
+
+```text
+这会覆盖已有证据支持的状态。
+是否作为作者设定写入并提升为 author_confirmed？
+```
+
+确认后写入。
+
 ## 2. 两个系统的概念对齐
 
 | SillyTavern 概念 | 本项目已有/应有概念 | 对齐方式 |
@@ -541,6 +591,26 @@ preview
 confirmation_policy
 ```
 
+这里要特别强调：高影响动作需要确认，不等于作者不能改。
+
+推荐交互：
+
+```text
+作者：把这个角色的目标改成 X，之前和它冲突的全部废弃。
+Agent：我会修改角色卡 3 个字段，废弃 2 条旧关系判断，并新增 1 条作者确认状态。
+[确认并写入]
+```
+
+作者确认后，不再要求额外证据。证据状态可标记为：
+
+```text
+authority = author_confirmed
+source_type = author_instruction
+evidence_status = author_override
+```
+
+后续模型应以该作者确认状态为准，而不是再被旧分析候选拉回去。
+
 ## 9. 前端技术路线
 
 ### 9.1 可选路线
@@ -563,6 +633,46 @@ SillyTavern 是 AGPL-3.0，直接使用源码需要接受对应开源义务。
 除非决定整个前端按 AGPL 开源，否则不建议作为主线。
 ```
 
+补充：如果这是私人项目，并且可以接受 SillyTavern 的协议影响，路线 B 可以升级为激进主线。
+
+激进主线含义：
+
+```text
+完全以 SillyTavern 前端为底座。
+保留它成熟的聊天、角色卡、世界书、Prompt Manager、Data Bank、Quick Replies、扩展机制。
+把本项目后端作为一个“Author State Engine / Writer Agent”后端服务接入。
+必要时放弃当前 React 前端技术原型。
+```
+
+这种情况下，我们不再把当前前端当主资产，而是把它视为：
+
+```text
+API 验证原型
+业务组件参考
+状态机工作区参考
+```
+
+落地方式可以是：
+
+```text
+1. fork SillyTavern 或作为子项目引入。
+2. 新增 Author Workbench 模式。
+3. 新增连接本项目 FastAPI 的后端 connector。
+4. 把角色卡、世界书、Prompt Manager 数据源替换/扩展为本项目状态机投影。
+5. 高影响写入走本项目动作草案确认。
+```
+
+需要接受的代价：
+
+```text
+AGPL-3.0 约束。
+Node/Express 前端服务和 Python/FastAPI 后端并存。
+需要维护和上游 SillyTavern 的差异。
+本项目状态机能力要通过 bridge API 暴露给 SillyTavern 前端。
+```
+
+私人项目下，如果你能接受这些代价，这条路线是可行的，而且能显著减少前端从零踩坑。
+
 路线 C：SillyTavern Extension/Plugin Bridge
 
 ```text
@@ -581,6 +691,25 @@ SillyTavern 是 AGPL-3.0，直接使用源码需要接受对应开源义务。
 ```
 
 如果后续明确接受 AGPL，可以另开分支评估代码复用。
+
+更新后的建议：
+
+```text
+保守主线：clean-room React 复刻 SillyTavern-like 体验。
+激进主线：直接基于 SillyTavern 前端改造。
+```
+
+结合“私人项目、前端可换、协议可接受”的前提，可以优先评估激进主线。
+
+评估标准：
+
+```text
+SillyTavern 前端能否较快接入本项目 FastAPI。
+角色卡/世界书/Prompt Manager 能否改造成状态机投影视图。
+动作草案确认能否嵌入现有聊天 UI。
+Data Bank/RAG UI 能否复用并接入 pgvector 证据索引。
+是否能保留 SillyTavern 原有聊天流畅度。
+```
 
 ## 10. 后端需要补的能力
 
@@ -708,6 +837,22 @@ SillyTavern 非沙箱 server plugin 作为主扩展系统。
 直接复制 AGPL 前端源码到当前项目。
 ```
 
+如果走激进主线，上面的“不建议”要改成“有条件允许”：
+
+```text
+允许使用 SillyTavern Node server 承载前端和部分 UI API。
+允许保留 SillyTavern 文件型配置作为前端用户偏好层。
+不允许用 SillyTavern 文件型数据替代本项目权威状态机。
+不允许绕过本项目动作草案确认直接写权威状态。
+```
+
+换句话说：
+
+```text
+SillyTavern 管聊天体验、前端配置、prompt 操作便利性。
+本项目管小说权威状态、审计、证据、状态版本、续写任务和状态回写。
+```
+
 ## 13. SillyTavern 插件桥接预留
 
 后续可以做：
@@ -731,6 +876,40 @@ POST /api/bridge/sillytavern/action
 ```
 
 这条线适合以后验证酒馆生态，但主产品仍应先做好自己的 Author Workbench。
+
+如果改走“直接基于 SillyTavern 前端”的路线，bridge 不再只是可选实验，而会变成主集成层。
+
+此时需要设计：
+
+```text
+SillyTavern Author State Engine Connector
+```
+
+职责：
+
+```text
+读取本项目角色卡投影。
+读取本项目世界书投影。
+读取 PromptContextSection。
+把 SillyTavern 当前聊天/作者指令发送给本项目 Agent Runtime。
+接收动作草案并在 SillyTavern UI 中显示确认卡。
+确认后调用本项目工具执行。
+把执行结果写回 SillyTavern 聊天流和本项目数据库。
+```
+
+最小 API：
+
+```text
+GET  /api/bridge/sillytavern/bootstrap
+GET  /api/bridge/sillytavern/characters
+GET  /api/bridge/sillytavern/worldbook
+GET  /api/bridge/sillytavern/prompt-sections
+POST /api/bridge/sillytavern/chat
+POST /api/bridge/sillytavern/action-drafts/{draft_id}/confirm-and-execute
+POST /api/bridge/sillytavern/state-edit-drafts
+```
+
+这样 SillyTavern 前端可以保持自己的成熟交互，而本项目后端继续保持权威状态机。
 
 ## 14. 下一轮执行建议
 
@@ -756,4 +935,3 @@ P2：SillyTavern bridge 插件。
 最终给模型的上下文能像 SillyTavern Prompt Manager 一样预览、排序、启停。
 RAG 命中片段能解释来源、scope、分数、注入位置和预算。
 ```
-
