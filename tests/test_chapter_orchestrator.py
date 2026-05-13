@@ -38,6 +38,30 @@ def test_service_internal_chapter_loop_and_final_render():
     assert "chapter_completed" in result.state.metadata
 
 
+def test_service_parallel_chapter_generation_merges_segments():
+    service = NovelContinuationService(
+        repository=InMemoryStoryStateRepository(),
+        generator=TemplateDraftGenerator(),
+        extractor=RuleBasedInformationExtractor(),
+    )
+    state = NovelAgentState.demo("continue next chapter in parallel")
+
+    result = service.continue_chapter_parallel_from_state(
+        state,
+        max_rounds=2,
+        min_chars=160,
+        min_paragraphs=1,
+        persist=False,
+        agent_concurrency=2,
+    )
+
+    assert result.final_chapter_text.strip()
+    assert result.rounds_executed == 2
+    assert [item["segment_index"] for item in result.state.metadata["parallel_segment_results"]] == [1, 2]
+    assert result.state.metadata["parallel_integration_report"]["segment_count"] == 2
+    assert result.state.chapter.content.strip() == result.final_chapter_text.strip()
+
+
 def test_service_lifts_min_chars_from_user_request():
     service = NovelContinuationService(
         repository=InMemoryStoryStateRepository(),

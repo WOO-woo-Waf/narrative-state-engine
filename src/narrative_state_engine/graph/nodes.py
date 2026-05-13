@@ -893,6 +893,18 @@ def domain_context_builder(state: NovelAgentState, _: NodeRuntime) -> NovelAgent
             f"{item.name}:{','.join(item.next_expected_beats[:2]) or item.stakes}"
             for item in state.domain.plot_threads[:6]
         ),
+        "relationships": "；".join(
+            f"{item.source_character_id}->{item.target_character_id}:公开={item.public_status};私下={item.private_status};冲突={','.join(item.unresolved_conflicts[:2])}"
+            for item in state.domain.relationships[:12]
+        ),
+        "scene_states": "；".join(
+            f"ch{item.chapter_index}/s{item.scene_index}:地点={item.location_id};目标={item.objective};beats={','.join(item.beats[:3])}"
+            for item in state.domain.scenes[:16]
+        ),
+        "foreshadowing": "；".join(
+            f"{item.seed_text}({item.status};{item.reveal_policy})"
+            for item in state.domain.foreshadowing[:16]
+        ),
     }
     state.domain.working_memory = WorkingMemoryContext(
         context_id=f"wm-{state.thread.request_id or state.thread.thread_id}",
@@ -1078,10 +1090,15 @@ def _build_narrative_query_for_state(state: NovelAgentState) -> NarrativeQuery:
         query_type="continuation_generation",
         target_chapter_index=state.chapter.chapter_number,
         scene_type=state.chapter.scene_cards[0] if state.chapter.scene_cards else "",
-        pov_character_id=state.chapter.pov_character_id,
+        pov_character_id=state.chapter.pov_character_id or "",
         involved_character_ids=[character.character_id for character in state.story.characters[:8]],
         plot_thread_ids=[thread.thread_id for thread in state.story.major_arcs[:6]],
-        token_budget=int(state.metadata.get("retrieval_token_budget", 4800) or 4800),
+        token_budget=int(
+            state.metadata.get("retrieval_token_budget")
+            or state.metadata.get("generation_context_budget")
+            or os.getenv("NOVEL_AGENT_GENERATION_CONTEXT_BUDGET", "4800")
+            or 4800
+        ),
     )
 
 
@@ -2173,7 +2190,9 @@ def memory_compressor(state: NovelAgentState, runtime: NodeRuntime) -> NovelAgen
     if not summary_parts:
         summary_parts.append((state.draft.content or "").replace("\n", " ")[:240])
 
-    block_id = f"commit-memory-{state.thread.request_id or state.thread.thread_id}"
+    round_no = state.metadata.get("chapter_loop_round")
+    round_suffix = f"-round-{round_no}" if round_no else ""
+    block_id = f"commit-memory-{state.thread.request_id or state.thread.thread_id}{round_suffix}"
     existing = {item.block_id for item in state.domain.compressed_memory}
     if block_id not in existing:
         state.domain.compressed_memory.append(

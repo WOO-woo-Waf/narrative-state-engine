@@ -52,3 +52,25 @@ def test_plot_planner_prefers_objective_over_demo_placeholder_arc():
 
     assert result.metadata["planned_beat"] == state.chapter.objective
     assert result.metadata.get("selected_plot_thread") is None
+
+
+def test_memory_compressor_keeps_per_round_blocks():
+    from narrative_state_engine.graph.nodes import make_runtime, memory_compressor
+
+    state = NovelAgentState.demo("续写。")
+    state.commit.status = CommitStatus.COMMITTED
+    state.draft.content = "第一轮正文。"
+    state.draft.planned_beat = "第一轮推进。"
+    state.metadata["chapter_loop_round"] = 1
+    runtime = make_runtime(generator=TemplateDraftGenerator())
+
+    first = memory_compressor(state, runtime)
+    second = first.model_copy(deep=True)
+    second.draft.content = "第二轮正文。"
+    second.draft.planned_beat = "第二轮推进。"
+    second.metadata["chapter_loop_round"] = 2
+    second = memory_compressor(second, runtime)
+
+    block_ids = [item.block_id for item in second.domain.compressed_memory]
+    assert any(item.endswith("round-1") for item in block_ids)
+    assert any(item.endswith("round-2") for item in block_ids)

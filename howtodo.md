@@ -1214,7 +1214,7 @@ reject-branch
 相关设计和实现文档：
 
 ```text
-docs/24_local_web_workbench.md
+docs/06_workbench_guides/24_local_web_workbench.md
 ```
 
 ---

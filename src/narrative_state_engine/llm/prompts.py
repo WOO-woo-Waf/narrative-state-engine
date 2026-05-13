@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 
 from narrative_state_engine.llm.prompt_management import compose_system_prompt
+from narrative_state_engine.llm.generation_context import (
+    DEFAULT_GENERATION_CONTEXT_BUDGET,
+    GenerationContextBuilder,
+)
 from narrative_state_engine.models import NovelAgentState
 
 
@@ -66,6 +71,60 @@ def _format_examples(state: NovelAgentState) -> tuple[str, str]:
     return (" || ".join(style_rows) if style_rows else "无"), (" || ".join(case_rows) if case_rows else "无")
 
 
+def _format_chapter_segment_blueprint(value) -> str:
+    rows = value if isinstance(value, list) else []
+    parts = []
+    for item in rows[:12]:
+        if not isinstance(item, dict):
+            continue
+        goal = _truncate_text(str(item.get("goal") or ""), max_chars=120)
+        beats = item.get("required_beats") or []
+        beat_text = "/".join(_truncate_text(str(beat), max_chars=50) for beat in beats[:3])
+        parts.append(
+            f"{item.get('segment_index', '?')}.{item.get('title', '片段')}: {goal}"
+            + (f" | beats={beat_text}" if beat_text else "")
+        )
+    return "；".join(parts)[:1800]
+
+
+def _format_current_chapter_segment(value) -> str:
+    if not isinstance(value, dict):
+        return ""
+    beats = value.get("required_beats") or []
+    focus = value.get("continuity_focus") or []
+    return (
+        f"{value.get('segment_index', '?')}.{value.get('title', '片段')} "
+        f"目标={_truncate_text(str(value.get('goal') or ''), max_chars=220)}; "
+        f"必写={'; '.join(_truncate_text(str(item), max_chars=80) for item in beats[:5]) or '无'}; "
+        f"连续性={'; '.join(_truncate_text(str(item), max_chars=80) for item in focus[:5]) or '无'}"
+    )[:900]
+
+
+def _generation_budget(state: NovelAgentState) -> int:
+    raw = (
+        state.metadata.get("generation_context_budget")
+        or state.metadata.get("retrieval_token_budget")
+        or os.getenv("NOVEL_AGENT_GENERATION_CONTEXT_BUDGET")
+        or DEFAULT_GENERATION_CONTEXT_BUDGET
+    )
+    try:
+        return max(int(raw), 1200)
+    except Exception:
+        return DEFAULT_GENERATION_CONTEXT_BUDGET
+
+
+def _context_chars(
+    state: NovelAgentState,
+    *,
+    low_budget_chars: int,
+    ratio: float,
+    high_budget_cap: int,
+) -> int:
+    budget = _generation_budget(state)
+    scaled = int(budget * ratio)
+    return max(low_budget_chars, min(high_budget_cap, scaled))
+
+
 def build_draft_messages(state: NovelAgentState) -> list[dict[str, str]]:
     system = compose_system_prompt(purpose="draft_generation").system_content
     schema = {
@@ -77,25 +136,69 @@ def build_draft_messages(state: NovelAgentState) -> list[dict[str, str]]:
     }
 
     style_examples_text, case_examples_text = _format_examples(state)
+    generation_context_text = GenerationContextBuilder().render(state)
     repair_prompt = _truncate_text(state.metadata.get("repair_prompt", ""), max_chars=180)
     natural_instruction = "若用户指令偏泛化，请优先延续既有冲突与节奏，自然推进情节。"
 
     fragment_stats = state.metadata.get("chapter_fragment_stats", {}) or {}
     segment_plan = state.metadata.get("chapter_segment_plan", {}) or {}
-    fragment_tail = _truncate_text(state.metadata.get("chapter_fragment_tail", ""), max_chars=320)
+    fragment_tail = _truncate_text(
+        state.metadata.get("chapter_fragment_tail", ""),
+        max_chars=_context_chars(state, low_budget_chars=1200, ratio=0.04, high_budget_cap=80_000),
+    )
+    chapter_blueprint_text = _format_chapter_segment_blueprint(
+        state.metadata.get("chapter_segment_blueprint", [])
+    )
+    current_segment_text = _format_current_chapter_segment(
+        state.metadata.get("chapter_current_segment", {})
+    )
+    progress_summary = _truncate_text(state.metadata.get("chapter_progress_summary", ""), max_chars=1800)
     domain_context = state.metadata.get("domain_context_sections", {}) or {}
     continuity_anchor_pack = state.metadata.get("continuity_anchor_pack", {}) or {}
-    continuity_anchor_text = _truncate_text(json.dumps(continuity_anchor_pack, ensure_ascii=False), max_chars=1200)
-    author_constraints_text = _truncate_text(domain_context.get("author_constraints", ""), max_chars=360)
-    compressed_memory_text = _truncate_text(domain_context.get("compressed_memory", ""), max_chars=520)
-    domain_character_text = _truncate_text(domain_context.get("character_cards", ""), max_chars=360)
-    setting_systems_text = _truncate_text(domain_context.get("setting_systems", ""), max_chars=700)
-    domain_plot_text = _truncate_text(domain_context.get("plot_threads", ""), max_chars=360)
-    retrieved_plot_text = _truncate_text(domain_context.get("plot_evidence", ""), max_chars=900)
-    retrieved_character_text = _truncate_text(domain_context.get("character_evidence", ""), max_chars=700)
-    retrieved_world_text = _truncate_text(domain_context.get("world_evidence", ""), max_chars=700)
-    retrieved_style_text = _truncate_text(domain_context.get("style_evidence", ""), max_chars=650)
-    retrieved_scene_case_text = _truncate_text(domain_context.get("scene_case_evidence", ""), max_chars=520)
+    continuity_anchor_text = _truncate_text(
+        json.dumps(continuity_anchor_pack, ensure_ascii=False),
+        max_chars=_context_chars(state, low_budget_chars=1200, ratio=0.03, high_budget_cap=60_000),
+    )
+    author_constraints_text = _truncate_text(
+        domain_context.get("author_constraints", ""),
+        max_chars=_context_chars(state, low_budget_chars=1200, ratio=0.02, high_budget_cap=40_000),
+    )
+    compressed_memory_text = _truncate_text(
+        domain_context.get("compressed_memory", ""),
+        max_chars=_context_chars(state, low_budget_chars=1800, ratio=0.03, high_budget_cap=60_000),
+    )
+    domain_character_text = _truncate_text(
+        domain_context.get("character_cards", ""),
+        max_chars=_context_chars(state, low_budget_chars=1800, ratio=0.04, high_budget_cap=80_000),
+    )
+    setting_systems_text = _truncate_text(
+        domain_context.get("setting_systems", ""),
+        max_chars=_context_chars(state, low_budget_chars=1800, ratio=0.04, high_budget_cap=80_000),
+    )
+    domain_plot_text = _truncate_text(
+        domain_context.get("plot_threads", ""),
+        max_chars=_context_chars(state, low_budget_chars=1600, ratio=0.03, high_budget_cap=60_000),
+    )
+    retrieved_plot_text = _truncate_text(
+        domain_context.get("plot_evidence", ""),
+        max_chars=_context_chars(state, low_budget_chars=2000, ratio=0.04, high_budget_cap=80_000),
+    )
+    retrieved_character_text = _truncate_text(
+        domain_context.get("character_evidence", ""),
+        max_chars=_context_chars(state, low_budget_chars=2000, ratio=0.04, high_budget_cap=80_000),
+    )
+    retrieved_world_text = _truncate_text(
+        domain_context.get("world_evidence", ""),
+        max_chars=_context_chars(state, low_budget_chars=2000, ratio=0.04, high_budget_cap=80_000),
+    )
+    retrieved_style_text = _truncate_text(
+        domain_context.get("style_evidence", ""),
+        max_chars=_context_chars(state, low_budget_chars=1800, ratio=0.03, high_budget_cap=60_000),
+    )
+    retrieved_scene_case_text = _truncate_text(
+        domain_context.get("scene_case_evidence", ""),
+        max_chars=_context_chars(state, low_budget_chars=1800, ratio=0.03, high_budget_cap=60_000),
+    )
     round_no = int(state.metadata.get("chapter_loop_round", 1) or 1)
     fragment_count = int(fragment_stats.get("fragment_count", 0) or 0)
     written_chars = int(fragment_stats.get("written_chars", 0) or 0)
@@ -157,6 +260,10 @@ def build_draft_messages(state: NovelAgentState) -> list[dict[str, str]]:
         f"检索世界观证据: {retrieved_world_text or '无'}\n"
         f"检索风格证据: {retrieved_style_text or '无'}\n"
         f"检索场景案例: {retrieved_scene_case_text or '无'}\n"
+        f"完整生成上下文:\n{generation_context_text or '无'}\n"
+        f"全章分段蓝图: {chapter_blueprint_text or '无'}\n"
+        f"本轮分段目标: {current_segment_text or '无'}\n"
+        f"已写进度摘要: {progress_summary or '无'}\n"
         f"已写片段尾部: {fragment_tail or '无'}\n"
         f"分段协议: {segment_directive}\n"
         f"修正提示: {repair_prompt or '无'}\n"
@@ -167,7 +274,7 @@ def build_draft_messages(state: NovelAgentState) -> list[dict[str, str]]:
         "写作要求:\n"
         "1. 只输出当前片段，不要重复前文，也不要总结整章。\n"
         "2. 片段必须是可直接拼接到章节中的正文，而不是提纲或说明。\n"
-        "3. 若总目标很长，也只完成本轮配额，把悬念留给下一轮。\n"
+        "3. 必须服从“本轮分段目标”，并承接“已写进度摘要”和“已写片段尾部”。\n"
         "4. continuity_notes 只记录本轮需要保持的连续性约束。\n"
         "5. 若作者约束存在，必须优先满足作者约束，不得触发禁止剧情点。\n"
         "6. 涉及能力、修炼、等级、术语、资源和代价时，必须遵守设定体系，不要临时发明能绕过限制的新规则。\n"

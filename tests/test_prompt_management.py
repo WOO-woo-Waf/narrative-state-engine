@@ -22,6 +22,17 @@ def test_prompt_registry_loads_default_profile_and_bindings():
     assert task_prompt.content_hash
 
 
+def test_global_prompt_uses_state_authority_not_context_override_rules():
+    registry = PromptRegistry()
+    prompt = registry.load_global_prompt("default")
+
+    assert "State Authority" in prompt.content
+    assert "来源隔离" in prompt.content
+    assert "证据可追溯" in prompt.content
+    assert "用户指令至高无上" not in prompt.content
+    assert "系统指令" in prompt.content
+
+
 def test_prompt_registry_loads_task_level_novel_analysis_prompts():
     registry = PromptRegistry()
     profile = registry.load_profile("default")
@@ -42,6 +53,8 @@ def test_prompt_registry_loads_task_level_novel_analysis_prompts():
         assert task_prompt.content_hash
         assert f"task_prompt_id: {purpose}" in composed.system_content
         assert "小说续写系统" in composed.system_content
+        if purpose.startswith("novel_"):
+            assert "Source Role Rules" in composed.system_content
 
 
 def test_prompt_composer_adds_global_and_task_prompts_to_each_builder():

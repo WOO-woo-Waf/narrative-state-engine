@@ -166,12 +166,12 @@ pytest -q
 
 ## Documents
 
-- `docs/01_architecture.md`
-- `docs/03_state_schema.md`
-- `docs/04_workflow.md`
-- `docs/05_mvp_tables.md`
-- `docs/08_architecture_usage.md`
-- `docs/09_code_api.md`
-- `docs/10_runtime_io_audit.md`
-- `docs/11_style_capture_modeling.md`
-- `docs/12_formal_run_template.md`
+- `docs/00_project_foundation/01_architecture.md`
+- `docs/00_project_foundation/03_state_schema.md`
+- `docs/00_project_foundation/04_workflow.md`
+- `docs/00_project_foundation/05_mvp_tables.md`
+- `docs/01_runtime_and_api/08_architecture_usage.md`
+- `docs/01_runtime_and_api/09_code_api.md`
+- `docs/01_runtime_and_api/10_runtime_io_audit.md`
+- `docs/02_authoring_and_domain_model/11_style_capture_modeling.md`
+- `docs/01_runtime_and_api/12_formal_run_template.md`

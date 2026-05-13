@@ -3,98 +3,147 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Narrative State Engine Workbench</title>
+  <title>Narrative State Engine Author Workbench</title>
   <style>
     :root {
       color-scheme: light;
-      --bg: #f6f7f9;
-      --panel: #ffffff;
-      --text: #20242a;
-      --muted: #66707d;
-      --line: #d9dee6;
-      --accent: #176b87;
-      --accent-2: #7d4f1f;
-      --ok: #237a4b;
-      --warn: #a76512;
-      --bad: #b73535;
-      --soft: #eef4f6;
+      --bg: #f4f6f8;
+      --surface: #ffffff;
+      --surface-2: #f9fafb;
+      --ink: #17202a;
+      --muted: #64717f;
+      --line: #d8dee6;
+      --brand: #176b87;
+      --brand-2: #4d7c43;
+      --gold: #9a6a16;
+      --danger: #b13a38;
+      --shadow: 0 14px 34px rgba(23, 32, 42, 0.08);
+      --radius: 8px;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       background: var(--bg);
-      color: var(--text);
-      font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
     }
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      padding: 14px 22px;
-      border-bottom: 1px solid var(--line);
-      background: var(--panel);
-      position: sticky;
-      top: 0;
-      z-index: 10;
-    }
-    h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: 0; }
-    h2 { margin: 0 0 10px; font-size: 16px; }
-    h3 { margin: 14px 0 8px; font-size: 14px; }
     button, input, select, textarea {
       font: inherit;
       border: 1px solid var(--line);
       border-radius: 6px;
+      color: var(--ink);
       background: #fff;
-      color: var(--text);
     }
-    input, select, textarea { width: 100%; padding: 8px 10px; }
-    textarea { min-height: 88px; resize: vertical; }
     button {
-      padding: 8px 12px;
-      cursor: pointer;
-      background: var(--accent);
-      border-color: var(--accent);
+      min-height: 34px;
+      padding: 7px 12px;
+      border-color: var(--brand);
+      background: var(--brand);
       color: #fff;
-      white-space: nowrap;
+      cursor: pointer;
+      font-weight: 650;
     }
-    button.secondary { background: #fff; color: var(--text); border-color: var(--line); }
+    button.secondary { background: #fff; color: var(--ink); border-color: var(--line); }
+    button.good { background: var(--brand-2); border-color: var(--brand-2); }
+    button.warn { background: var(--gold); border-color: var(--gold); }
+    button.danger { background: var(--danger); border-color: var(--danger); }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    input, select, textarea { width: 100%; padding: 8px 10px; }
+    textarea { min-height: 96px; resize: vertical; }
+    h1, h2, h3 { margin: 0; letter-spacing: 0; }
+    h1 { font-size: 20px; }
+    h2 { font-size: 16px; }
+    h3 { font-size: 14px; margin-bottom: 6px; }
+    p { margin: 6px 0; }
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: rgba(255, 255, 255, 0.96);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(12px);
+    }
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(240px, 1fr) minmax(480px, 0.9fr);
+      gap: 18px;
+      align-items: end;
+      padding: 14px 20px;
+    }
+    .workspace-title { display: grid; gap: 3px; }
+    .subtitle { color: var(--muted); font-size: 12px; }
+    .selectors {
+      display: grid;
+      grid-template-columns: minmax(160px, 1fr) minmax(180px, 1fr) auto;
+      gap: 10px;
+      align-items: end;
+    }
+    label { display: grid; gap: 4px; font-weight: 650; }
+    label span { font-size: 12px; color: var(--muted); font-weight: 500; }
     main {
       display: grid;
-      grid-template-columns: 260px 1fr;
-      min-height: calc(100vh - 58px);
+      grid-template-columns: 250px minmax(0, 1fr);
+      min-height: 0;
     }
     nav {
-      padding: 16px;
       border-right: 1px solid var(--line);
-      background: #fbfbfc;
+      background: #fbfcfd;
+      padding: 14px;
     }
     nav button {
       width: 100%;
-      text-align: left;
-      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 7px;
       background: transparent;
-      color: var(--text);
+      color: var(--ink);
       border-color: transparent;
+      text-align: left;
+      font-weight: 650;
     }
     nav button.active {
-      background: var(--soft);
-      border-color: #c9dce3;
-      color: #0f4f67;
-      font-weight: 700;
+      background: #e8f2f5;
+      color: #0f5369;
+      border-color: #c6dfe8;
     }
-    .content { padding: 18px 22px 40px; }
-    .toolbar { display: grid; grid-template-columns: 1fr 160px 110px; gap: 10px; align-items: end; }
-    .grid { display: grid; gap: 12px; }
-    .grid.cols { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .panel {
-      background: var(--panel);
+    nav small { color: var(--muted); font-weight: 600; }
+    .content { padding: 18px 22px 42px; min-width: 0; }
+    .notice {
+      margin-bottom: 14px;
+      padding: 10px 12px;
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--muted);
+    }
+    .view { display: grid; gap: 14px; }
+    .hidden { display: none !important; }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
       padding: 14px;
+      box-shadow: var(--shadow);
       min-width: 0;
     }
-    .metric { font-size: 24px; font-weight: 800; color: var(--accent); }
+    .band {
+      background: var(--surface);
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      padding: 14px;
+    }
+    .grid { display: grid; gap: 12px; }
+    .cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 0.78fr); gap: 12px; align-items: start; }
+    .metric { font-size: 27px; line-height: 1.1; font-weight: 850; color: var(--brand); margin-top: 6px; }
     .muted { color: var(--muted); }
     .pill {
       display: inline-flex;
@@ -102,320 +151,844 @@
       min-height: 24px;
       padding: 2px 8px;
       border-radius: 999px;
-      background: #edf1f4;
-      color: #37424f;
-      margin: 2px 4px 2px 0;
+      background: #eef2f5;
+      color: #314150;
       font-size: 12px;
+      margin: 2px 4px 2px 0;
+      max-width: 100%;
+      overflow-wrap: anywhere;
     }
-    .pill.ok { background: #e7f3ec; color: var(--ok); }
-    .pill.warn { background: #fff3df; color: var(--warn); }
-    .pill.bad { background: #fae8e8; color: var(--bad); }
-    .list { display: grid; gap: 8px; }
+    .pill.good { background: #e6f3e8; color: #23603a; }
+    .pill.warn { background: #fff3d8; color: #83530a; }
+    .pill.bad { background: #fae6e5; color: #96302e; }
+    .pill.info { background: #e6f2f7; color: #155770; }
     .item {
       border: 1px solid var(--line);
       border-radius: 7px;
-      padding: 10px;
       background: #fff;
+      padding: 10px;
+      min-width: 0;
     }
-    pre {
+    .item.selected { outline: 2px solid var(--brand); border-color: var(--brand); }
+    .item-header {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .list { display: grid; gap: 8px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .field-grid {
+      display: grid;
+      grid-template-columns: 170px minmax(0, 1fr);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .field-grid > div { padding: 8px; border-bottom: 1px solid var(--line); }
+    .field-grid > div:nth-child(odd) { background: var(--surface-2); color: var(--muted); font-weight: 650; }
+    .field-grid > div:nth-last-child(-n+2) { border-bottom: 0; }
+    pre, .code-box {
       white-space: pre-wrap;
       word-break: break-word;
-      background: #f1f3f5;
+      background: #f2f4f6;
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 7px;
       padding: 10px;
-      max-height: 360px;
+      max-height: 420px;
       overflow: auto;
     }
     details { margin-top: 8px; }
-    summary { cursor: pointer; color: var(--accent); }
-    .form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-    .form-grid .wide { grid-column: 1 / -1; }
-    label { display: grid; gap: 4px; font-weight: 600; }
-    label span { color: var(--muted); font-size: 12px; font-weight: 500; }
-    .hidden { display: none; }
-    .chapter-text {
-      white-space: pre-wrap;
-      max-height: 520px;
-      overflow: auto;
-      border-left: 3px solid var(--accent-2);
-      padding-left: 12px;
+    summary { cursor: pointer; color: var(--brand); font-weight: 650; }
+    .timeline {
+      display: grid;
+      gap: 10px;
+      counter-reset: step;
     }
-    @media (max-width: 900px) {
-      main { grid-template-columns: 1fr; }
-      nav { display: flex; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
-      nav button { width: auto; min-width: 96px; }
-      .toolbar, .grid.cols, .form-grid { grid-template-columns: 1fr; }
+    .step {
+      display: grid;
+      grid-template-columns: 36px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: #e8f2f5;
+      color: var(--brand);
+      font-weight: 800;
+    }
+    .chat {
+      display: grid;
+      gap: 10px;
+    }
+    .chat-bubble {
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    .chat-bubble.model { background: #eef6f1; border-color: #cde5d3; }
+    .draft-text {
+      white-space: pre-wrap;
+      border-left: 3px solid var(--brand);
+      padding-left: 12px;
+      max-height: 620px;
+      overflow: auto;
+    }
+    .toolbar-line {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 8px;
+      align-items: end;
+    }
+    .filter-line {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 150px 140px 110px;
+      gap: 8px;
+    }
+    .empty {
+      padding: 18px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      background: #fff;
+    }
+    @media (max-width: 1050px) {
+      .topbar, main, .split, .cols-2, .cols-3, .cols-4, .selectors, .toolbar-line, .filter-line {
+        grid-template-columns: 1fr;
+      }
+      nav {
+        display: flex;
+        overflow-x: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+      nav button { width: auto; min-width: 116px; }
+      .field-grid { grid-template-columns: 1fr; }
+      .field-grid > div:nth-child(odd) { border-bottom: 0; }
+      .field-grid > div:nth-last-child(-n+2) { border-bottom: 1px solid var(--line); }
     }
   </style>
 </head>
 <body>
+<div class="app">
   <header>
-    <div>
-      <h1>本地小说工作台</h1>
-      <div class="muted">分析、作者确认、检索证据和续写结果的可视化控制台</div>
-    </div>
-    <div class="toolbar">
-      <label>Story ID<input id="storyId" value="story_123_series"></label>
-      <label>Task ID<input id="taskId" value="task_123_series"></label>
-      <button id="refreshBtn">刷新</button>
+    <div class="topbar">
+      <div class="workspace-title">
+        <h1>作者工作台</h1>
+        <div class="subtitle">分析入库、状态审核、作者对话、章节规划、续写分支和主线合并</div>
+      </div>
+      <div class="selectors">
+        <label>Story ID<input id="storyId" value="story_first_test"></label>
+        <label>Task ID<input id="taskId" value="task_first_test_llm_rerun_20260509"></label>
+        <button id="refreshBtn">刷新</button>
+      </div>
     </div>
   </header>
   <main>
     <nav id="tabs">
-      <button data-tab="overview" class="active">总览</button>
-      <button data-tab="analysis">小说分析</button>
-      <button data-tab="author">作者确认</button>
-      <button data-tab="generated">续写内容</button>
-      <button data-tab="retrieval">检索证据</button>
-      <button data-tab="jobs">任务运行</button>
+      <button class="active" data-tab="dashboard">总览 <small>pipeline</small></button>
+      <button data-tab="audit">状态审计 <small>fields</small></button>
+      <button data-tab="dialogue">模型对话 <small>edit/plan</small></button>
+      <button data-tab="planning">剧情规划 <small>blueprint</small></button>
+      <button data-tab="generation">续写管理 <small>branches</small></button>
+      <button data-tab="evidence">证据风格 <small>RAG</small></button>
+      <button data-tab="ops">任务日志 <small>jobs</small></button>
     </nav>
     <section class="content">
-      <div id="notice" class="panel muted">正在读取本地状态...</div>
-      <section id="overview" class="view"></section>
-      <section id="analysis" class="view hidden"></section>
-      <section id="author" class="view hidden"></section>
-      <section id="generated" class="view hidden"></section>
-      <section id="retrieval" class="view hidden"></section>
-      <section id="jobs" class="view hidden"></section>
+      <div id="notice" class="notice">正在读取数据库状态...</div>
+      <section id="dashboard" class="view"></section>
+      <section id="audit" class="view hidden"></section>
+      <section id="dialogue" class="view hidden"></section>
+      <section id="planning" class="view hidden"></section>
+      <section id="generation" class="view hidden"></section>
+      <section id="evidence" class="view hidden"></section>
+      <section id="ops" class="view hidden"></section>
     </section>
   </main>
-  <script>
-    const state = { tab: "overview", health: {}, jobsTimer: null };
-    const $ = (id) => document.getElementById(id);
-    const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
-    const storyId = () => $("storyId").value.trim() || "story_123_series";
-    const taskId = () => $("taskId").value.trim() || "task_123_series";
-    const api = async (path, options) => {
-      const response = await fetch(path, options);
-      if (!response.ok) throw new Error(await response.text());
-      return response.json();
+</div>
+
+<script>
+const app = {
+  tab: "dashboard",
+  data: {},
+  selectedCandidateIds: new Set(),
+  selectedCandidateSetId: "",
+  selectedBranchId: "",
+};
+
+const $ = (id) => document.getElementById(id);
+const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+const storyId = () => $("storyId").value.trim() || "story_first_test";
+const taskId = () => $("taskId").value.trim() || storyId();
+const query = () => `task_id=${encodeURIComponent(taskId())}`;
+const fmt = (value) => Number(value || 0).toLocaleString();
+const pct = (value) => `${Math.round(Number(value || 0) * 100)}%`;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const statusClass = (value) => {
+  const text = String(value || "");
+  if (["accepted", "canonical", "author_locked", "succeeded", "embedded", "confirmed", "draft"].includes(text)) return "good";
+  if (["pending_review", "candidate", "running", "queued", "reference_only"].includes(text)) return "warn";
+  if (["rejected", "failed", "conflicted"].includes(text)) return "bad";
+  return "info";
+};
+const api = async (path, options) => {
+  const response = await fetch(path, options);
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+};
+const pills = (obj) => {
+  const entries = Object.entries(obj || {});
+  if (!entries.length) return '<span class="muted">暂无</span>';
+  return entries.map(([k, v]) => `<span class="pill">${esc(k)}: ${esc(v)}</span>`).join("");
+};
+const arrList = (items, limit = 12) => {
+  const rows = (items || []).filter(Boolean).slice(0, limit);
+  if (!rows.length) return '<div class="muted">暂无</div>';
+  return `<div class="list">${rows.map((item) => `<div>${esc(typeof item === "string" ? item : compactValue(item))}</div>`).join("")}</div>`;
+};
+const raw = (value, label = "原始数据") => `<details><summary>${label}</summary><pre>${esc(JSON.stringify(value ?? {}, null, 2))}</pre></details>`;
+function compactValue(value) {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(compactValue).join("；");
+  if (typeof value === "object") {
+    return value.name || value.summary || value.text || value.rule_text || value.definition || Object.entries(value).slice(0, 6).map(([k, v]) => `${k}: ${compactValue(v)}`).join("；");
+  }
+  return String(value);
+}
+function objectTitle(payload, fallback = "") {
+  return payload?.name || payload?.rule_text || payload?.seed_text || payload?.summary || payload?.definition || fallback || "未命名";
+}
+function fieldRows(payload) {
+  const entries = Object.entries(payload || {}).filter(([_, v]) => v !== "" && v != null && !(Array.isArray(v) && !v.length));
+  if (!entries.length) return '<div class="muted">暂无字段</div>';
+  return `<div class="field-grid">${entries.slice(0, 28).map(([key, value]) => `<div>${esc(key)}</div><div>${esc(compactValue(value))}</div>`).join("")}</div>`;
+}
+function setNotice(text, kind = "") {
+  $("notice").innerHTML = `<span class="pill ${kind}">${esc(text)}</span>`;
+}
+
+async function refreshAll() {
+  setNotice("正在刷新数据库视图", "warn");
+  try {
+    const base = `/api/stories/${encodeURIComponent(storyId())}`;
+    const [health, overview, analysis, state, author, generated, retrieval, jobs] = await Promise.all([
+      api("/api/health"),
+      api(`${base}/overview?${query()}`),
+      api(`${base}/analysis?${query()}`),
+      api(`${base}/state?${query()}`),
+      api(`${base}/author-plan?${query()}`),
+      api(`${base}/generated?${query()}`),
+      api(`${base}/retrieval?${query()}`),
+      api("/api/jobs"),
+    ]);
+    app.data = { health, overview, analysis, state, author, generated, retrieval, jobs };
+    app.selectedCandidateSetId = state.candidate_sets?.[0]?.candidate_set_id || app.selectedCandidateSetId || "";
+    renderCurrent();
+    setNotice(health.database?.ok ? "数据库已连接，页面直接读取数据库与缓存" : `数据库不可用：${health.database?.message || ""}`, health.database?.ok ? "good" : "bad");
+  } catch (error) {
+    setNotice(`刷新失败：${error.message}`, "bad");
+  }
+}
+
+function renderCurrent() {
+  if (app.tab === "dashboard") renderDashboard();
+  if (app.tab === "audit") renderAudit();
+  if (app.tab === "dialogue") renderDialogue();
+  if (app.tab === "planning") renderPlanning();
+  if (app.tab === "generation") renderGeneration();
+  if (app.tab === "evidence") renderEvidence();
+  if (app.tab === "ops") renderOps();
+}
+
+function renderDashboard() {
+  const o = app.data.overview?.status || {};
+  const state = app.data.state || {};
+  const generated = app.data.generated || {};
+  const author = app.data.author || {};
+  const pendingSet = (state.candidate_sets || []).find((set) => set.status === "pending_review");
+  const latestBranch = (generated.branches || [])[0];
+  $("dashboard").innerHTML = `
+    <div class="grid cols-4">
+      ${metricCard("资料源", Object.values(o.source_documents_by_type || {}).reduce((a,b)=>a+Number(b),0), pills(o.source_documents_by_type))}
+      ${metricCard("证据索引", Object.values(o.evidence_by_type || {}).reduce((a,b)=>a+Number(b),0), pills(o.embedding_status))}
+      ${metricCard("状态对象", (state.state_objects || []).length, pills(state.state_object_type_counts))}
+      ${metricCard("续写分支", (generated.branches || []).length, pills(o.branches_by_status))}
+    </div>
+    <div class="split">
+      <div class="panel">
+        <h2>作者链路</h2>
+        <div class="timeline">
+          ${stepHtml("分析候选", pendingSet ? "有待审核候选集" : "候选已处理或暂无候选", pendingSet ? `<button data-go="audit">进入审核</button>` : `<button class="secondary" data-job="state-candidates">查看候选</button>`)}
+          ${stepHtml("状态入主线", `当前状态版本 v${o.latest_state?.version_no || 0}`, `<button data-materialize>生成状态快照</button>`)}
+          ${stepHtml("作者规划", `${(author.chapter_blueprints || []).length} 个章节蓝图`, `<button data-go="dialogue">和模型规划</button>`)}
+          ${stepHtml("章节生成", latestBranch ? `最新分支：${latestBranch.status}` : "暂无续写分支", `<button data-go="generation">续写管理</button>`)}
+        </div>
+      </div>
+      <div class="panel">
+        <h2>最近状态审核</h2>
+        ${reviewCards(state.latest_reviews || [])}
+      </div>
+    </div>
+    <div class="panel">
+      <h2>资料导入与分析</h2>
+      <p class="muted">主故事使用 LLM 分析生成状态候选；参考文本默认 evidence-only，只入 RAG 证据，不污染主线状态。</p>
+      <div class="grid cols-4">
+        <label>输入文件<input id="sourceFile" value="novels_input/1.txt"></label>
+        <label>标题<input id="sourceTitle" value="第一次测试"></label>
+        <label>source_type<select id="sourceType">
+          <option value="target_continuation">主故事 target_continuation</option>
+          <option value="same_author_world_style">同世界观/同作者参考</option>
+          <option value="crossover_linkage">联动番外参考</option>
+          <option value="style_reference">纯风格参考</option>
+        </select></label>
+        <label>模式<select id="sourceMode"><option value="analysis">LLM 深度分析</option><option value="evidence">只入 RAG 证据</option><option value="ingest">仅原文入库</option></select></label>
+      </div>
+      <div class="grid cols-4" style="margin-top:10px">
+        <label>分析块<input id="sourceAnalysisChars" type="number" value="60000"></label>
+        <label>证据块<input id="sourceEvidenceChars" type="number" value="1600"></label>
+        <label>重叠<input id="sourceEvidenceOverlap" type="number" value="180"></label>
+        <label>LLM 并发<input id="sourceConcurrency" type="number" min="1" max="8" value="3"></label>
+      </div>
+      <div class="actions" style="margin-top:10px">
+        <button data-run-source>运行资料流程</button>
+        <button class="secondary" data-backfill>补齐 embedding</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>分析摘要</h2>
+      <p>${esc(app.data.analysis?.story_synopsis || "暂无分析摘要")}</p>
+      <div class="row">
+        <span class="pill">analysis: ${esc(app.data.analysis?.analysis_run?.analysis_version || "")}</span>
+        <span class="pill ${statusClass(app.data.analysis?.analysis_run?.status)}">${esc(app.data.analysis?.analysis_run?.status || "unknown")}</span>
+        <span class="pill">style snippets: ${fmt(app.data.analysis?.analysis_run?.snippet_count || 0)}</span>
+      </div>
+    </div>
+  `;
+  wireGlobalButtons();
+  document.querySelector("[data-run-source]")?.addEventListener("click", runSourcePipeline);
+}
+
+function metricCard(title, value, body) {
+  return `<div class="panel"><h2>${esc(title)}</h2><div class="metric">${fmt(value)}</div><div style="margin-top:8px">${body}</div></div>`;
+}
+function stepHtml(title, desc, action) {
+  return `<div class="step"><div><b>${esc(title)}</b><p class="muted">${esc(desc)}</p></div><div>${action}</div></div>`;
+}
+function reviewCards(reviews) {
+  if (!reviews.length) return '<div class="empty">暂无状态审核报告</div>';
+  return `<div class="list">${reviews.slice(0, 4).map((r) => `
+    <div class="item">
+      <div class="item-header"><b>${esc(r.review_type || r.review_id)}</b><span class="pill ${Number(r.overall_score || 0) > 0.8 ? "good" : "warn"}">${pct(r.overall_score)}</span></div>
+      <div>${Object.entries(r.dimension_scores || {}).map(([k,v]) => `<span class="pill">${esc(k)} ${pct(v)}</span>`).join("")}</div>
+      <h3>弱项</h3>${arrList([...(r.missing_dimensions || []), ...(r.weak_dimensions || [])], 12)}
+      <h3>人工问题</h3>${arrList(r.human_review_questions || [], 8)}
+    </div>`).join("")}</div>`;
+}
+
+function renderAudit() {
+  const state = app.data.state || {};
+  const items = state.candidate_items || [];
+  const selectedSet = app.selectedCandidateSetId || state.candidate_sets?.[0]?.candidate_set_id || "";
+  const filterType = $("auditTypeFilter")?.value || "";
+  const filterStatus = $("auditStatusFilter")?.value || "";
+  const search = ($("auditSearch")?.value || "").trim();
+  const pageSize = Number($("auditPageSize")?.value || 40);
+  const visible = items.filter((item) => {
+    if (selectedSet && item.candidate_set_id !== selectedSet) return false;
+    if (filterType && item.target_object_type !== filterType) return false;
+    if (filterStatus && item.status !== filterStatus) return false;
+    if (search && !JSON.stringify(item.proposed_payload || {}).includes(search) && !String(item.candidate_item_id).includes(search)) return false;
+    return true;
+  });
+  const pageItems = visible.slice(0, pageSize);
+  const visibleStateObjects = (state.state_objects || []).slice(0, Math.max(pageSize, 40));
+  $("audit").innerHTML = `
+    <div class="grid cols-3">
+      ${metricCard("候选项", items.length, pills(state.candidate_item_type_counts))}
+      ${metricCard("候选状态", Object.values(state.candidate_item_status_counts || {}).reduce((a,b)=>a+Number(b),0), pills(state.candidate_item_status_counts))}
+      ${metricCard("正式状态", (state.state_objects || []).length, pills(state.state_object_authority_counts))}
+    </div>
+    <div class="panel">
+      <div class="toolbar-line">
+        <label>候选集<select id="candidateSetSelect">${(state.candidate_sets || []).map((set) => `<option value="${esc(set.candidate_set_id)}" ${set.candidate_set_id === selectedSet ? "selected" : ""}>${esc(set.status)} / ${esc(set.source_id)}</option>`).join("")}</select></label>
+        <button data-accept-set>接受整组</button>
+        <button class="warn" data-lock-set>接受并锁定</button>
+      </div>
+      <div class="filter-line" style="margin-top:10px">
+        <input id="auditSearch" placeholder="搜索角色名、字段、候选 ID" value="${esc(search)}">
+        <select id="auditTypeFilter"><option value="">全部类型</option>${unique(items.map(i=>i.target_object_type)).map(t => `<option value="${esc(t)}" ${t===filterType ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>
+        <select id="auditStatusFilter"><option value="">全部状态</option>${unique(items.map(i=>i.status)).map(s => `<option value="${esc(s)}" ${s===filterStatus ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>
+        <select id="auditPageSize"><option value="20" ${pageSize===20 ? "selected" : ""}>20 条</option><option value="40" ${pageSize===40 ? "selected" : ""}>40 条</option><option value="80" ${pageSize===80 ? "selected" : ""}>80 条</option></select>
+      </div>
+      <div class="actions" style="margin-top:10px">
+        <button data-accept-selected>接受选中</button>
+        <button class="warn" data-lock-selected>锁定选中</button>
+        <button class="danger" data-reject-selected>拒绝选中</button>
+        <button class="secondary" data-clear-selection>清空选择</button>
+        <span class="muted">已选 ${app.selectedCandidateIds.size} 项，命中 ${visible.length} 项，当前渲染 ${pageItems.length} 项</span>
+      </div>
+    </div>
+    <div class="split">
+      <div class="panel">
+        <h2>候选字段审计</h2>
+        <div class="list">${pageItems.map(candidateCard).join("") || '<div class="empty">暂无候选项</div>'}</div>
+      </div>
+      <div class="panel">
+        <h2>正式状态对象</h2>
+        <p class="muted">为保持页面流畅，当前仅渲染前 ${visibleStateObjects.length} 个对象。</p>
+        <div class="list">${visibleStateObjects.map(stateObjectCard).join("") || '<div class="empty">暂无正式状态对象。可先接受候选并 materialize。</div>'}</div>
+      </div>
+    </div>
+  `;
+  wireAudit();
+}
+function candidateCard(item) {
+  const payload = item.proposed_payload || {};
+  const selected = app.selectedCandidateIds.has(item.candidate_item_id);
+  return `<div class="item ${selected ? "selected" : ""}" data-candidate-card="${esc(item.candidate_item_id)}">
+    <div class="item-header">
+      <div>
+        <b>${esc(objectTitle(payload, item.candidate_item_id))}</b>
+        <div class="row">
+          <span class="pill info">${esc(item.target_object_type)}</span>
+          <span class="pill ${statusClass(item.status)}">${esc(item.status)}</span>
+          <span class="pill">${esc(item.authority_request)}</span>
+          <span class="pill">conf ${Number(item.confidence || 0).toFixed(2)}</span>
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:650"><input type="checkbox" data-candidate-check="${esc(item.candidate_item_id)}" ${selected ? "checked" : ""} style="width:auto">选择</label>
+    </div>
+    ${fieldRows(payload)}
+    ${payload.field_evidence ? `<h3>字段证据</h3>${fieldRows(payload.field_evidence)}` : ""}
+    ${payload.missing_fields?.length ? `<h3>缺失字段</h3>${arrList(payload.missing_fields, 20)}` : ""}
+    ${payload.quality_flags?.length ? `<h3>质量标记</h3>${arrList(payload.quality_flags, 20)}` : ""}
+    <p class="muted">${esc(item.candidate_item_id)}</p>
+  </div>`;
+}
+function stateObjectCard(item) {
+  return `<div class="item">
+    <div class="item-header">
+      <b>${esc(item.display_name || item.object_key)}</b>
+      <span class="pill ${statusClass(item.authority)}">${esc(item.authority)}</span>
+    </div>
+    <div class="row">
+      <span class="pill">${esc(item.object_type)}</span>
+      <span class="pill">conf ${Number(item.confidence || 0).toFixed(2)}</span>
+      <span class="pill">evidence ${fmt(item.evidence_count)}</span>
+      ${item.author_locked ? '<span class="pill good">作者锁定</span>' : ""}
+    </div>
+    ${fieldRows(item.payload)}
+  </div>`;
+}
+function wireAudit() {
+  const setSelect = $("candidateSetSelect");
+  if (setSelect) setSelect.onchange = () => { app.selectedCandidateSetId = setSelect.value; app.selectedCandidateIds.clear(); renderAudit(); };
+  ["auditSearch", "auditTypeFilter", "auditStatusFilter", "auditPageSize"].forEach((id) => { const el = $(id); if (el) el.oninput = renderAudit; });
+  document.querySelectorAll("[data-candidate-check]").forEach((box) => {
+    box.onchange = () => {
+      if (box.checked) app.selectedCandidateIds.add(box.dataset.candidateCheck);
+      else app.selectedCandidateIds.delete(box.dataset.candidateCheck);
+      document.querySelector(`[data-candidate-card="${CSS.escape(box.dataset.candidateCheck)}"]`)?.classList.toggle("selected", box.checked);
     };
-    const chips = (obj) => {
-      if (!obj || Object.keys(obj).length === 0) return '<span class="muted">暂无数据</span>';
-      return Object.entries(obj).map(([k, v]) => `<span class="pill">${esc(k)}: ${esc(v)}</span>`).join("");
-    };
-    const list = (items) => {
-      if (!items || items.length === 0) return '<div class="muted">暂无数据</div>';
-      return `<ul>${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`;
-    };
-    const raw = (value) => `<details><summary>原始 JSON</summary><pre>${esc(JSON.stringify(value ?? {}, null, 2))}</pre></details>`;
+  });
+  document.querySelector("[data-accept-set]")?.addEventListener("click", () => reviewCandidates({ action: "accept", authority: "canonical", selectedOnly: false }));
+  document.querySelector("[data-lock-set]")?.addEventListener("click", () => reviewCandidates({ action: "accept", authority: "author_locked", selectedOnly: false }));
+  document.querySelector("[data-accept-selected]")?.addEventListener("click", () => reviewCandidates({ action: "accept", authority: "canonical", selectedOnly: true }));
+  document.querySelector("[data-lock-selected]")?.addEventListener("click", () => reviewCandidates({ action: "accept", authority: "author_locked", selectedOnly: true }));
+  document.querySelector("[data-reject-selected]")?.addEventListener("click", () => reviewCandidates({ action: "reject", authority: "canonical", selectedOnly: true }));
+  document.querySelector("[data-clear-selection]")?.addEventListener("click", () => { app.selectedCandidateIds.clear(); renderAudit(); });
+}
 
-    async function loadAll() {
-      $("notice").textContent = "正在刷新...";
-      try {
-        state.health = await api("/api/health");
-        await renderCurrent();
-        $("notice").innerHTML = state.health.database?.ok
-          ? `数据库可用。输出目录：${esc(state.health.output_dir.path)}`
-          : `数据库不可用或未配置：${esc(state.health.database?.message || "")}`;
-      } catch (error) {
-        $("notice").textContent = `刷新失败：${error.message}`;
-      }
-    }
-
-    async function renderCurrent() {
-      const tab = state.tab;
-      const taskQuery = `task_id=${encodeURIComponent(taskId())}`;
-      if (tab === "overview") return renderOverview(await api(`/api/stories/${storyId()}/overview?${taskQuery}`));
-      if (tab === "analysis") return renderAnalysis(await api(`/api/stories/${storyId()}/analysis?${taskQuery}`));
-      if (tab === "author") return renderAuthor(await api(`/api/stories/${storyId()}/author-plan?${taskQuery}`));
-      if (tab === "generated") return renderGenerated(await api(`/api/stories/${storyId()}/generated?${taskQuery}`));
-      if (tab === "retrieval") return renderRetrieval(await api(`/api/stories/${storyId()}/retrieval?${taskQuery}`));
-      if (tab === "jobs") return renderJobs();
-    }
-
-    function renderOverview(data) {
-      const s = data.status || {};
-      $("overview").innerHTML = `
-        <div class="grid cols">
-          <div class="panel"><h2>资料</h2><div class="metric">${esc(s.source_chunks || 0)}</div><div class="muted">原文切块数量</div>${chips(s.source_documents_by_type)}</div>
-          <div class="panel"><h2>证据</h2><div class="metric">${Object.values(s.evidence_by_type || {}).reduce((a,b)=>a+Number(b),0)}</div><div class="muted">结构化证据数量</div>${chips(s.evidence_by_type)}</div>
-          <div class="panel"><h2>状态</h2><div class="metric">v${esc(s.latest_state?.version_no || 0)}</div><div class="muted">最新状态版本</div><span class="pill ok">commit_status: ${esc(s.latest_state?.commit_status || "unknown")}</span></div>
+function renderDialogue() {
+  const author = app.data.author || {};
+  const latestProposal = latestAuthorProposal(author);
+  const pendingQuestions = latestProposal.clarifying_questions || latestProposal.open_questions || [];
+  $("dialogue").innerHTML = `
+    <div class="split">
+      <div class="panel">
+        <h2>和模型对话修改状态</h2>
+        <p class="muted">这里会调用 edit-state，把你的自然语言意见转成状态修改候选。建议先 draft，再确认。</p>
+        <label>修改意见<textarea id="stateEditText">请帮我检查角色卡，补充缺失字段，并把我明确确认的设定标记为作者锁定。</textarea></label>
+        <div class="actions" style="margin-top:10px">
+          <button data-edit-state>提交状态修改</button>
+          <button class="secondary" data-edit-state-draft>只生成草案</button>
         </div>
-        <div class="grid cols" style="margin-top:12px">
-          <div class="panel"><h2>Embedding</h2>${chips(s.embedding_status)}<p class="muted">${esc(data.field_help?.embedding_status)}</p></div>
-          <div class="panel"><h2>续写回流</h2><div class="metric">${esc(s.generated_documents || 0)}</div><div class="muted">generated_continuation 文档</div></div>
-          <div class="panel"><h2>检索记录</h2><div class="metric">${esc(s.retrieval_runs || 0)}</div><div class="muted">retrieval_runs 总数</div></div>
+      </div>
+      <div class="panel">
+        <h2>和模型对话规划后续剧情</h2>
+        <p class="muted">这里会调用 author-session，结合当前状态和 RAG 证据生成作者规划、约束与章节蓝图。</p>
+        <label>下一章意图<textarea id="authorSeed">下一章需要承接当前状态，重点推进人物关系、世界规则和主线冲突。请根据已有状态和参考风格证据，制定下一章剧情规划、必须写到的情节点、禁止破坏的设定，以及章节蓝图。</textarea></label>
+        <div class="item" style="margin-top:10px">
+          <div class="item-header">
+            <b>模型追问</b>
+            <span class="pill ${statusClass(latestProposal.status)}">${esc(latestProposal.status || "no proposal")}</span>
+          </div>
+          ${questionAnswerHtml(pendingQuestions)}
         </div>
-        ${raw(data)}
-      `;
-    }
-
-    function renderAnalysis(data) {
-      const bible = data.story_bible || {};
-      $("analysis").innerHTML = `
-        <div class="panel"><h2>全局梗概</h2><p>${esc(data.story_synopsis || "暂无全局梗概")}</p></div>
-        <div class="grid cols" style="margin-top:12px">
-          <div class="panel"><h2>角色卡</h2>${(bible.character_cards || []).slice(0, 12).map(c => `<div class="item"><b>${esc(c.name || c.character_id)}</b>${list([...(c.appearance_profile || []), ...(c.voice_profile || []), ...(c.state_transitions || [])].slice(0, 8))}</div>`).join("") || '<div class="muted">暂无角色卡</div>'}</div>
-          <div class="panel"><h2>剧情线</h2>${(bible.plot_threads || []).slice(0, 12).map(t => `<div class="item"><b>${esc(t.name || t.thread_id)}</b><p>${esc(t.stakes || t.stage || "")}</p>${list(t.open_questions || [])}</div>`).join("") || '<div class="muted">暂无剧情线</div>'}</div>
-          <div class="panel"><h2>世界规则</h2>${(bible.world_rules || []).slice(0, 16).map(r => `<div class="item"><span class="pill">${esc(r.rule_type || "rule")}</span> ${esc(r.rule_text || "")}</div>`).join("") || '<div class="muted">暂无世界规则</div>'}</div>
+        <label style="margin-top:10px">补充回答<span>也可以把额外说明一行一个写在这里，会和上面的逐题回答一起发送。</span><textarea id="authorAnswers"></textarea></label>
+        <div class="grid cols-3" style="margin-top:10px">
+          <label>检索数量<input id="authorRetrievalLimit" type="number" min="1" max="40" value="20"></label>
+          <label>模式<select id="authorMode"><option value="llm">LLM</option><option value="rule">规则</option></select></label>
+          <label>RAG<select id="authorRag"><option value="true">启用</option><option value="false">关闭</option></select></label>
         </div>
-        <div class="panel" style="margin-top:12px"><h2>章节分析</h2><div class="list">${(data.chapter_states || []).slice(0, 30).map(ch => `<div class="item"><b>第 ${esc(ch.chapter_index)} 章 ${esc(ch.chapter_title || "")}</b><p>${esc(ch.chapter_synopsis || ch.chapter_summary || "")}</p><div>${(ch.characters_involved || []).map(x => `<span class="pill">${esc(x)}</span>`).join("")}</div></div>`).join("") || '<div class="muted">暂无章节分析</div>'}</div></div>
-        <div class="panel" style="margin-top:12px"><h2>风格片段</h2><div class="list">${(data.style_snippets || []).slice(0, 20).map(s => `<div class="item"><span class="pill">${esc(s.snippet_type)}</span><p>${esc(s.text)}</p></div>`).join("") || '<div class="muted">暂无风格片段</div>'}</div></div>
-        ${raw(data.raw)}
-      `;
-    }
-
-    function renderAuthor(data) {
-      const plan = data.author_plan || {};
-      $("author").innerHTML = `
-        <div class="grid cols">
-          <div class="panel"><h2>作者目标</h2><p>${esc(plan.author_goal || "暂无作者目标")}</p><h3>主剧情骨架</h3>${list(plan.major_plot_spine || [])}</div>
-          <div class="panel"><h2>必须写</h2><p class="muted">${esc(data.field_help?.required_beats)}</p>${list(plan.required_beats || [])}</div>
-          <div class="panel"><h2>禁止写</h2><p class="muted">${esc(data.field_help?.forbidden_beats)}</p>${list(plan.forbidden_beats || [])}</div>
+        <div class="actions" style="margin-top:10px">
+          <button data-author-session-draft>先生成问题/草案</button>
+          <button class="good" data-author-session>带回答确认规划</button>
         </div>
-        <div class="panel" style="margin-top:12px"><h2>章节蓝图</h2><div class="list">${(data.chapter_blueprints || []).map(b => `<div class="item"><b>第 ${esc(b.chapter_index)} 章</b><p>${esc(b.chapter_goal || "")}</p><span class="pill">ending_hook: ${esc(b.ending_hook || "")}</span>${list(b.required_beats || [])}</div>`).join("") || '<div class="muted">暂无章节蓝图</div>'}</div></div>
-        <div class="panel" style="margin-top:12px"><h2>作者约束</h2><div class="list">${(data.author_constraints || []).map(c => `<div class="item"><span class="pill ${c.status === "confirmed" ? "ok" : "warn"}">${esc(c.status)}</span> ${esc(c.text || "")}</div>`).join("") || '<div class="muted">暂无作者约束</div>'}</div></div>
-        <div class="panel" style="margin-top:12px"><h2>作者对话检索证据</h2><p class="muted">${esc(data.author_dialogue_retrieval?.query_text || "暂无检索上下文")}</p><div class="list">${(data.author_dialogue_retrieval?.evidence || []).slice(0, 12).map(e => `<div class="item"><span class="pill">${esc(e.evidence_type)}</span><span class="pill">${esc(e.source_type)}</span><p>${esc(e.text)}</p></div>`).join("") || '<div class="muted">暂无证据</div>'}</div></div>
-        ${raw(data.raw)}
-      `;
-    }
+      </div>
+    </div>
+    <div class="panel">
+      <h2>当前作者规划</h2>
+      ${authorPlanHtml(author)}
+    </div>
+    <div class="panel">
+      <h2>最近状态修改草案</h2>
+      ${stateEditProposalHtml(author.latest_state_edit_proposal)}
+    </div>
+    <div class="panel">
+      <h2>最近作者对话检索</h2>
+      ${retrievalEvidenceHtml(author.author_dialogue_retrieval)}
+    </div>
+  `;
+  document.querySelector("[data-edit-state]").onclick = () => submitJob("edit-state", { author_input: $("stateEditText").value, confirm: true, persist: true }, { stay: true, tab: "dialogue" });
+  document.querySelector("[data-edit-state-draft]").onclick = () => submitJob("edit-state", { author_input: $("stateEditText").value, confirm: false, persist: true }, { stay: true, tab: "dialogue" });
+  const authorPayload = (confirm) => ({
+    seed: $("authorSeed").value,
+    answers: [
+      ...Array.from(document.querySelectorAll("[data-question-answer]")).map((item) => item.value.trim()).filter(Boolean),
+      ...$("authorAnswers").value.split(/\n+/).map(x => x.trim()).filter(Boolean),
+    ],
+    retrieval_limit: Number($("authorRetrievalLimit").value || 20),
+    llm: $("authorMode").value === "llm",
+    rag: $("authorRag").value === "true",
+    confirm,
+    persist: true,
+  });
+  document.querySelector("[data-author-session-draft]").onclick = () => submitJob("author-session", authorPayload(false), { stay: true, tab: "dialogue" });
+  document.querySelector("[data-author-session]").onclick = () => submitJob("author-session", authorPayload(true), { stay: true, tab: "dialogue" });
+}
+function latestAuthorProposal(author) {
+  const proposals = author.author_plan_proposals || [];
+  return proposals.length ? proposals[proposals.length - 1] : {};
+}
+function questionAnswerHtml(questions) {
+  const rows = (questions || []).filter(Boolean).slice(0, 8);
+  if (!rows.length) return '<div class="empty">暂无待回答问题。可以先生成问题/草案，或直接提交明确规划。</div>';
+  return `<div class="list">${rows.map((q, idx) => {
+    const question = typeof q === "string" ? q : q.question || compactValue(q);
+    const reason = typeof q === "string" ? "" : q.reason || "";
+    const type = typeof q === "string" ? "question" : q.question_type || "question";
+    return `<label>${idx + 1}. ${esc(type)}<span>${esc(question)}${reason ? `｜${esc(reason)}` : ""}</span><textarea data-question-answer placeholder="在这里回答这个追问"></textarea></label>`;
+  }).join("")}</div>`;
+}
+function stateEditProposalHtml(proposal) {
+  if (!proposal || !proposal.proposal_id) return '<div class="empty">暂无状态修改草案。先提交“只生成草案”可以在这里审计差异。</div>';
+  return `<div class="item">
+    <div class="item-header"><b>${esc(proposal.proposal_id)}</b><span class="pill ${statusClass(proposal.status)}">${esc(proposal.status)}</span></div>
+    <h3>操作</h3>
+    <div class="list">${(proposal.operations || []).map((op) => `<div class="item"><span class="pill">${esc(op.target_type)}</span><span class="pill">${esc(op.field_path)}</span><p>${esc(compactValue(op.value))}</p></div>`).join("") || '<div class="muted">暂无操作</div>'}</div>
+    <h3 style="margin-top:10px">需要澄清</h3>
+    ${arrList(proposal.clarifying_questions || proposal.open_questions || [], 8)}
+    <h3 style="margin-top:10px">差异</h3>
+    ${arrList(proposal.diff || [], 16)}
+    ${raw(proposal, "完整状态修改草案")}
+  </div>`;
+}
+function authorPlanHtml(author) {
+  const plan = author.author_plan || {};
+  const latestProposal = latestAuthorProposal(author);
+  return `<div class="grid cols-3">
+    <div class="item"><h3>目标</h3><p>${esc(plan.author_goal || "暂无")}</p><h3>主线</h3>${arrList(plan.major_plot_spine || [], 12)}</div>
+    <div class="item"><h3>必须写到</h3>${arrList(plan.required_beats || [], 16)}</div>
+    <div class="item"><h3>禁止破坏</h3>${arrList(plan.forbidden_beats || [], 16)}</div>
+  </div>
+  <h3 style="margin-top:12px">约束</h3>
+  <div class="list">${(author.author_constraints || []).map((c) => `<div class="item"><span class="pill ${statusClass(c.status)}">${esc(c.status)}</span> ${esc(c.text || c.constraint_text || compactValue(c))}</div>`).join("") || '<div class="empty">暂无作者约束</div>'}</div>
+  <h3 style="margin-top:12px">模型追问</h3>
+  ${arrList(latestProposal.clarifying_questions || latestProposal.open_questions || [], 12)}`;
+}
 
-    function renderGenerated(data) {
-      $("generated").innerHTML = `
-        <div class="grid cols">
-          <div class="panel"><h2>提交状态</h2><span class="pill ok">${esc(data.latest_commit?.status || "unknown")}</span><p class="muted">${esc(data.field_help?.commit_status)}</p></div>
-          <div class="panel"><h2>校验</h2><span class="pill">${esc(data.latest_validation?.status || "unknown")}</span><p>${esc(data.latest_validation?.requires_human_review ? "需要人工复核" : "未标记人工复核")}</p></div>
-          <div class="panel"><h2>数据库生成记录</h2><div class="metric">${esc((data.database_documents || []).length)}</div></div>
+function renderPlanning() {
+  const author = app.data.author || {};
+  $("planning").innerHTML = `
+    <div class="grid cols-3">
+      ${metricCard("规划提案", (author.author_plan_proposals || []).length, "")}
+      ${metricCard("章节蓝图", (author.chapter_blueprints || []).length, "")}
+      ${metricCard("作者约束", (author.author_constraints || []).length, "")}
+    </div>
+    <div class="split">
+      <div class="panel">
+        <h2>章节蓝图</h2>
+        <div class="list">${(author.chapter_blueprints || []).map(blueprintCard).join("") || '<div class="empty">暂无章节蓝图。请先在“模型对话”中运行 author-session。</div>'}</div>
+      </div>
+      <div class="panel">
+        <h2>规划提案历史</h2>
+        <div class="list">${(author.author_plan_proposals || []).slice().reverse().map((p) => `<div class="item"><b>${esc(p.proposal_id)}</b><span class="pill ${statusClass(p.status)}">${esc(p.status)}</span>${fieldRows(p.proposed_plan || {})}${raw(p, "完整提案")}</div>`).join("") || '<div class="empty">暂无提案</div>'}</div>
+      </div>
+    </div>
+  `;
+}
+function blueprintCard(b) {
+  return `<div class="item">
+    <div class="item-header"><b>第 ${esc(b.chapter_index)} 章</b><span class="pill">${esc(b.status || "blueprint")}</span></div>
+    <p>${esc(b.chapter_goal || b.summary || "")}</p>
+    <h3>必要情节点</h3>${arrList(b.required_beats || b.beats || [], 16)}
+    <h3>结尾钩子</h3><p>${esc(b.ending_hook || "暂无")}</p>
+    ${raw(b)}
+  </div>`;
+}
+
+function renderGeneration() {
+  const generated = app.data.generated || {};
+  $("generation").innerHTML = `
+    <div class="split">
+      <div class="panel">
+        <h2>运行续写</h2>
+        <label>生成指令<textarea id="generatePrompt">根据已确认的作者规划续写下一章。</textarea></label>
+        <div class="grid cols-3" style="margin-top:10px">
+          <label>输出文件<input id="generateOutput" value="novels_output/first_test_next_chapter_draft.txt"></label>
+          <label>最少字数<input id="generateMinChars" type="number" min="80" value="3000"></label>
+          <label>上下文预算<input id="generateBudget" type="number" min="0" value="600000"></label>
+          <label>章节模式<select id="generateMode"><option value="parallel">parallel</option><option value="sequential">sequential</option></select></label>
+          <label>并发<input id="generateConcurrency" type="number" min="1" max="8" value="3"></label>
+          <label>分支模式<select id="generateBranchMode"><option value="draft">draft</option><option value="mainline">mainline</option></select></label>
         </div>
-        <div class="panel" style="margin-top:12px"><h2>输出章节文件</h2><div class="list">${(data.output_files || []).map(f => `<div class="item"><b>${esc(f.name)}</b><span class="pill">${esc(f.chars)} 字符</span><div class="chapter-text">${esc(f.content)}</div></div>`).join("") || '<div class="muted">novels_output 下暂无 txt 输出</div>'}</div></div>
-        <div class="panel" style="margin-top:12px"><h2>续写分支</h2><div class="list">${(data.branches || []).map(b => `<div class="item"><b>${esc(b.branch_id)}</b><span class="pill ${b.status === "accepted" ? "ok" : b.status === "rejected" ? "bad" : "warn"}">${esc(b.status)}</span><span class="pill">${esc(b.chars)} 字符</span><p class="muted">base=v${esc(b.base_state_version_no || "")} parent=${esc(b.parent_branch_id || "")} ${esc(b.output_path || "")}</p><p>${esc(b.preview || "")}</p></div>`).join("") || '<div class="muted">暂无续写分支</div>'}</div></div>
-        <div class="panel" style="margin-top:12px"><h2>数据库 generated_continuation</h2><div class="list">${(data.database_documents || []).map(d => `<div class="item"><b>${esc(d.title)}</b><span class="pill">${esc(d.total_chars)} 字符</span><span class="pill">${esc(d.metadata?.branch_status || "mainline")}</span><p class="muted">${esc(d.created_at)} ${esc(d.file_path)}</p></div>`).join("") || '<div class="muted">暂无数据库生成记录</div>'}</div></div>
-        ${raw(data)}
-      `;
-    }
-
-    function renderRetrieval(data) {
-      $("retrieval").innerHTML = `
-        <div class="panel"><h2>最近检索记录</h2><p class="muted">${esc(data.field_help?.retrieval_runs)}</p><div class="list">${(data.runs || []).map(r => `<div class="item"><b>${esc(r.query_text)}</b><p><span class="pill">${esc(r.latency_ms)} ms</span><span class="pill">${esc(r.selected_count)} selected</span><span class="pill">${esc(r.created_at)}</span></p><div>${chips(r.candidate_counts)}</div>${raw(r)}</div>`).join("") || '<div class="muted">暂无检索记录</div>'}</div></div>
-      `;
-    }
-
-    async function renderJobs() {
-      const jobs = await api("/api/jobs");
-      const tasks = await api("/api/tasks");
-      $("jobs").innerHTML = `
-        <div class="panel"><h2>Task 管理</h2><div class="list">${(tasks.tasks || []).map(t => `<div class="item"><b>${esc(t.task_id)}</b><span class="pill">${esc(t.story_id)}</span><span class="pill">${esc(t.status || "active")}</span><p>${esc(t.title || "")}</p><p class="muted">${esc(t.updated_at || "")}</p><button class="secondary" data-use-task="${esc(t.task_id)}" data-use-story="${esc(t.story_id)}">切换</button></div>`).join("") || '<div class="muted">暂无 task_runs 记录</div>'}</div></div>
-        <div class="panel"><h2>运行任务</h2>${jobForm()}</div>
-        <div class="panel" style="margin-top:12px"><h2>任务日志</h2><div class="list">${(jobs.jobs || []).map(j => `<div class="item"><b>${esc(j.task)}</b><span class="pill ${j.status === "succeeded" ? "ok" : j.status === "failed" ? "bad" : "warn"}">${esc(j.status)}</span><p class="muted">${esc(j.created_at)} exit=${esc(j.exit_code ?? "")}</p><pre>${esc((j.stdout || "") + (j.stderr ? "\n[stderr]\n" + j.stderr : "") + (j.error ? "\n[error]\n" + j.error : ""))}</pre>${raw(j.command)}</div>`).join("") || '<div class="muted">暂无任务</div>'}</div></div>
-      `;
-      document.querySelectorAll("[data-use-task]").forEach(btn => {
-        btn.onclick = async () => {
-          $("taskId").value = btn.dataset.useTask || taskId();
-          $("storyId").value = btn.dataset.useStory || storyId();
-          state.tab = "overview";
-          document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x.dataset.tab === "overview"));
-          document.querySelectorAll(".view").forEach(view => view.classList.toggle("hidden", view.id !== state.tab));
-          await renderCurrent();
-        };
-      });
-      $("runJob").onclick = submitJob;
-      $("taskSelect").onchange = updateTaskHints;
-      updateTaskHints();
-    }
-
-    function jobForm() {
-      return `
-        <div class="form-grid">
-          <label>任务<span>固定白名单命令</span><select id="taskSelect">
-            <option value="search-debug">search-debug</option>
-            <option value="generate-chapter">generate-chapter</option>
-            <option value="author-session">author-session</option>
-            <option value="edit-state">edit-state</option>
-            <option value="create-state">create-state</option>
-            <option value="branch-status">branch-status</option>
-            <option value="accept-branch">accept-branch</option>
-            <option value="reject-branch">reject-branch</option>
-            <option value="analyze-task">analyze-task</option>
-            <option value="ingest-txt">ingest-txt</option>
-            <option value="backfill-embeddings">backfill-embeddings</option>
-          </select></label>
-          <label>输入文件<span>仅 novels_input 内</span><input id="jobFile" value="novels_input/1.txt"></label>
-          <label>输出文件<span>仅 novels_output 内</span><input id="jobOutput" value="novels_output/chapter_preview.txt"></label>
-          <label class="wide">Prompt / Seed / Query<textarea id="jobText">角色联动 世界观 主线推进 人物关系 场景行动</textarea></label>
-          <label>标题<input id="jobTitle" value="target_continuation_1"></label>
-          <label>source_type<input id="jobSourceType" value="target_continuation"></label>
-          <label>limit / rounds<input id="jobLimit" value="8"></label>
-          <label>min_chars<input id="jobMinChars" value="800"></label>
-          <label>branch_id<input id="jobBranchId" value=""></label>
-          <label>branch_mode<select id="jobBranchMode"><option value="draft">draft</option><option value="mainline">mainline</option></select></label>
-          <label>persist<select id="jobPersist"><option value="false">false</option><option value="true">true</option></select></label>
-          <label>LLM<select id="jobLlm"><option value="true">true</option><option value="false">false</option></select></label>
-          <label>RAG<select id="jobRag"><option value="true">true</option><option value="false">false</option></select></label>
-          <label class="wide">Objective<textarea id="jobObjective">完成下一章正文，保持人物状态、场景行动、交互逻辑和主线推进一致。</textarea></label>
-          <div><button id="runJob">运行任务</button></div>
-          <div class="wide muted" id="taskHint"></div>
+        <div class="actions" style="margin-top:10px"><button data-generate>生成草稿</button><button class="secondary" data-branch-status>刷新分支</button></div>
+      </div>
+      <div class="panel">
+        <h2>分支审核</h2>
+        <p class="muted">选中分支后可以继续让作者模型修改，或接受进入主线。</p>
+        <div class="actions">
+          <button class="good" data-accept-branch>接受分支入主线</button>
+          <button class="danger" data-reject-branch>丢弃分支</button>
+          <button class="secondary" data-revise-branch>用作者对话修改分支</button>
         </div>
-      `;
-    }
+        <label style="margin-top:10px">分支修改意见<textarea id="branchRevisionText">请根据我的意见重写这个草稿，保留已确认设定，改善节奏和人物动机。</textarea></label>
+      </div>
+    </div>
+    <div class="split">
+      <div class="panel">
+        <h2>续写分支</h2>
+        <div class="list">${(generated.branches || []).map(branchCard).join("") || '<div class="empty">暂无续写分支</div>'}</div>
+      </div>
+      <div class="panel">
+        <h2>输出文件</h2>
+        <div class="list">${(generated.output_files || []).slice(0, 20).map((f) => `<div class="item"><b>${esc(f.name)}</b><span class="pill">${fmt(f.chars)} 字</span><p class="muted">${esc(f.path)}</p><div class="draft-text">${esc(f.preview || "")}</div></div>`).join("") || '<div class="empty">暂无输出文件</div>'}</div>
+      </div>
+    </div>
+  `;
+  document.querySelector("[data-generate]").onclick = () => submitJob("generate-chapter", {
+    prompt: $("generatePrompt").value,
+    output: $("generateOutput").value,
+    min_chars: Number($("generateMinChars").value || 3000),
+    context_budget: Number($("generateBudget").value || 600000),
+    chapter_mode: $("generateMode").value,
+    agent_concurrency: Number($("generateConcurrency").value || 3),
+    branch_mode: $("generateBranchMode").value,
+    persist: true,
+    rag: true,
+    review_output: "novels_output/state_reviews/next_chapter_web_review.json",
+  });
+  document.querySelector("[data-branch-status]").onclick = () => submitJob("branch-status", { limit: 40 });
+  document.querySelector("[data-accept-branch]").onclick = () => branchAction("accept-branch");
+  document.querySelector("[data-reject-branch]").onclick = () => branchAction("reject-branch");
+  document.querySelector("[data-revise-branch]").onclick = () => {
+    if (!app.selectedBranchId) return alert("请先选择一个分支");
+    submitJob("author-session", { branch_id: app.selectedBranchId, seed: $("branchRevisionText").value, llm: true, rag: true, persist: true });
+  };
+  document.querySelectorAll("[data-branch]").forEach((el) => {
+    el.onclick = () => { app.selectedBranchId = el.dataset.branch; renderGeneration(); };
+  });
+}
+function branchCard(branch) {
+  const selected = app.selectedBranchId === branch.branch_id;
+  return `<div class="item ${selected ? "selected" : ""}" data-branch="${esc(branch.branch_id)}">
+    <div class="item-header"><b>${esc(branch.branch_id)}</b><span class="pill ${statusClass(branch.status)}">${esc(branch.status)}</span></div>
+    <div class="row"><span class="pill">第 ${esc(branch.chapter_number || "")} 章</span><span class="pill">${fmt(branch.chars)} 字</span><span class="pill">base v${esc(branch.base_state_version_no || "")}</span></div>
+    <p class="muted">${esc(branch.output_path || "")}</p>
+    <div class="draft-text">${esc(branch.preview || "")}</div>
+    ${raw(branch.metadata || {}, "分支元数据")}
+  </div>`;
+}
 
-    function updateTaskHints() {
-      const task = $("taskSelect").value;
-      $("taskHint").textContent = {
-        "search-debug": "使用 Prompt/Seed/Query 作为检索 query，默认不启动远程服务。",
-        "generate-chapter": "使用 Prompt/Seed/Query 作为续写 prompt，默认 --no-persist，输出到 novels_output。",
-        "author-session": "使用 Prompt/Seed/Query 作为作者规划 seed。",
-        "edit-state": "使用 Prompt/Seed/Query 作为自然语言状态编辑，勾选 persist 和 confirm 后保存。",
-        "create-state": "使用 Prompt/Seed/Query 从零创建初始小说状态。",
-        "analyze-task": "分析输入文件，可选择 LLM 和 persist。",
-        "ingest-txt": "导入输入文件到数据库。",
-        "backfill-embeddings": "补齐 story 下证据向量，不启动或停止远程服务。"
-      }[task] || "";
-    }
+function renderEvidence() {
+  const retrieval = app.data.retrieval || {};
+  const analysis = app.data.analysis || {};
+  $("evidence").innerHTML = `
+    <div class="split">
+      <div class="panel">
+        <h2>检索调试</h2>
+        <label>查询<textarea id="searchQuery">叙事节奏 对话 风格 场景描写 人物关系 主线推进</textarea></label>
+        <div class="grid cols-3" style="margin-top:10px">
+          <label>数量<input id="searchLimit" type="number" min="1" value="12"></label>
+          <label>记录检索<select id="searchLog"><option value="true">记录</option><option value="false">不记录</option></select></label>
+          <label>rerank<select id="searchRerank"><option value="true">启用</option><option value="false">关闭</option></select></label>
+        </div>
+        <div class="actions" style="margin-top:10px"><button data-search>运行检索</button></div>
+      </div>
+      <div class="panel">
+        <h2>风格样例</h2>
+        <div class="list">${(analysis.style_snippets || []).slice(0, 16).map((s) => `<div class="item"><span class="pill">${esc(s.snippet_type)}</span><span class="pill">${esc(s.chapter_number || "")}</span><p>${esc(s.text || "")}</p></div>`).join("") || '<div class="empty">暂无风格样例</div>'}</div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>最近检索运行</h2>
+      <div class="list">${(retrieval.runs || []).map((run) => `<div class="item"><b>${esc(run.query_text)}</b><span class="pill">${fmt(run.selected_count)} 条</span><span class="pill">${fmt(run.latency_ms)} ms</span><p class="muted">${esc(run.created_at)}</p>${retrievalEvidenceHtml({ evidence: run.selected_evidence })}${raw(run.query_plan || {}, "query_plan")}</div>`).join("") || '<div class="empty">暂无 retrieval_runs，可先运行检索调试。</div>'}</div>
+    </div>
+  `;
+  document.querySelector("[data-search]").onclick = () => submitJob("search-debug", {
+    query: $("searchQuery").value,
+    limit: Number($("searchLimit").value || 12),
+    log_run: $("searchLog").value === "true",
+    rerank: $("searchRerank").value === "true",
+  });
+}
+function retrievalEvidenceHtml(context) {
+  const evidence = context?.evidence || context?.selected_evidence || [];
+  if (!evidence.length) return '<div class="empty">暂无检索证据</div>';
+  return `<div class="list">${evidence.slice(0, 20).map((e) => `<div class="item"><span class="pill">${esc(e.evidence_type || e.type || "")}</span><span class="pill">${esc(e.source_type || e.source || "")}</span><p>${esc(e.text || e.quote_text || e.summary || compactValue(e))}</p>${e.score ? `<span class="pill">score ${Number(e.score).toFixed(3)}</span>` : ""}</div>`).join("")}</div>`;
+}
 
-    async function submitJob() {
-      const task = $("taskSelect").value;
-      const text = $("jobText").value;
-      const limit = Number($("jobLimit").value || 8);
-      const params = {
-        story_id: storyId(),
-        task_id: taskId(),
-        file: $("jobFile").value,
-        output: $("jobOutput").value,
-        title: $("jobTitle").value,
-        source_type: $("jobSourceType").value,
-        query: text,
-        seed: text,
-        prompt: text,
-        author_input: text,
-        description: text,
-        confirm: task === "edit-state",
-        objective: $("jobObjective").value,
-        limit,
-        rounds: Math.max(1, limit),
-        min_chars: Number($("jobMinChars").value || 800),
-        branch_id: $("jobBranchId").value,
-        branch_mode: $("jobBranchMode").value,
-        continue_from_branch: $("jobBranchId").value,
-        min_paragraphs: 3,
-        concurrency: 3,
-        retrieval_limit: 12,
-        llm: $("jobLlm").value === "true",
-        rag: $("jobRag").value === "true",
-        persist: $("jobPersist").value === "true",
-        rerank: true,
-        log_run: task === "search-debug"
-      };
-      try {
-        await api("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task, params }) });
-        await renderJobs();
-      } catch (error) {
-        alert(`任务提交失败：${error.message}`);
-      }
-    }
+function renderOps() {
+  const jobs = app.data.jobs?.jobs || [];
+  $("ops").innerHTML = `
+    <div class="panel">
+      <h2>快捷任务</h2>
+      <div class="grid cols-4">
+        <button data-materialize>materialize-state</button>
+        <button data-review-state>review-state</button>
+        <button data-backfill>backfill-embeddings</button>
+        <button class="secondary" data-refresh-jobs>刷新任务日志</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>任务运行日志</h2>
+      <div class="list">${jobs.map(jobCard).join("") || '<div class="empty">暂无任务日志</div>'}</div>
+    </div>
+  `;
+  wireGlobalButtons();
+  document.querySelector("[data-refresh-jobs]").onclick = refreshAll;
+}
+function jobCard(job) {
+  return `<div class="item"><div class="item-header"><b>${esc(job.task)}</b><span class="pill ${statusClass(job.status)}">${esc(job.status)}</span></div><p class="muted">${esc(job.created_at)} exit=${esc(job.exit_code ?? "")}</p><pre>${esc([job.stdout, job.stderr, job.error].filter(Boolean).join("\n"))}</pre>${raw(job.command || [], "命令")}</div>`;
+}
 
-    $("tabs").addEventListener("click", async (event) => {
-      const button = event.target.closest("button[data-tab]");
-      if (!button) return;
-      state.tab = button.dataset.tab;
-      document.querySelectorAll("nav button").forEach(btn => btn.classList.toggle("active", btn === button));
-      document.querySelectorAll(".view").forEach(view => view.classList.toggle("hidden", view.id !== state.tab));
-      await renderCurrent();
+async function submitJob(task, params = {}, options = {}) {
+  const payload = { story_id: storyId(), task_id: taskId(), ...params };
+  setNotice(`已提交任务：${task}`, "warn");
+  const job = await api("/api/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ task, params: payload }),
+  });
+  if (options.stay) {
+    setNotice(`任务 ${task} 已在后台运行，完成后会自动刷新当前页面。`, "warn");
+    pollJob(job.job_id, options.tab || app.tab);
+    return;
+  }
+  await refreshAll();
+  app.tab = "ops";
+  switchTab("ops");
+}
+async function pollJob(jobId, targetTab) {
+  for (let i = 0; i < 300; i += 1) {
+    await sleep(2000);
+    const job = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
+    if (!["queued", "running"].includes(job.status)) {
+      await refreshAll();
+      switchTab(targetTab || app.tab);
+      setNotice(job.status === "succeeded" ? `任务完成：${job.task}` : `任务失败：${job.task}，请查看任务日志`, job.status === "succeeded" ? "good" : "bad");
+      return;
+    }
+  }
+  setNotice("任务仍在运行，可到任务日志查看。", "warn");
+}
+async function runSourcePipeline() {
+  const mode = $("sourceMode").value;
+  const common = {
+    file: $("sourceFile").value,
+    title: $("sourceTitle").value,
+    source_type: $("sourceType").value,
+  };
+  if (mode === "ingest") {
+    await submitJob("ingest-txt", {
+      ...common,
+      target_chars: Number($("sourceEvidenceChars").value || 1600),
+      overlap_chars: Number($("sourceEvidenceOverlap").value || 180),
     });
-    $("refreshBtn").onclick = loadAll;
-    loadAll();
-    setInterval(() => { if (state.tab === "jobs") renderJobs(); }, 4000);
-  </script>
+    return;
+  }
+  await submitJob("analyze-task", {
+    ...common,
+    llm: mode === "analysis",
+    evidence_only: mode === "evidence",
+    persist: true,
+    max_chunk_chars: Number($("sourceAnalysisChars").value || 60000),
+    overlap_chars: 0,
+    concurrency: Number($("sourceConcurrency").value || 3),
+    evidence_target_chars: Number($("sourceEvidenceChars").value || 1600),
+    evidence_overlap_chars: Number($("sourceEvidenceOverlap").value || 180),
+    state_review_output: mode === "analysis" ? "novels_output/state_reviews/web_analysis_state_review.json" : "",
+  });
+}
+async function reviewCandidates({ action, authority, selectedOnly }) {
+  const candidate_set_id = app.selectedCandidateSetId || app.data.state?.candidate_sets?.[0]?.candidate_set_id;
+  if (!candidate_set_id) return alert("没有候选集");
+  const ids = selectedOnly ? Array.from(app.selectedCandidateIds) : [];
+  if (selectedOnly && !ids.length) return alert("请先选择候选项");
+  await submitJob("review-state-candidates", {
+    candidate_set_id,
+    action,
+    authority,
+    candidate_item_ids: ids,
+    reason: `${action} ${selectedOnly ? "selected candidates" : "candidate set"} from author workbench`,
+  });
+}
+async function branchAction(task) {
+  if (!app.selectedBranchId) return alert("请先选择一个分支");
+  await submitJob(task, { branch_id: app.selectedBranchId });
+}
+function wireGlobalButtons() {
+  document.querySelectorAll("[data-go]").forEach((btn) => btn.onclick = () => switchTab(btn.dataset.go));
+  document.querySelectorAll("[data-materialize]").forEach((btn) => btn.onclick = () => submitJob("materialize-state", { reason: "作者工作台确认状态入主线" }));
+  document.querySelectorAll("[data-review-state]").forEach((btn) => btn.onclick = () => submitJob("review-state", { persist: true }));
+  document.querySelectorAll("[data-backfill]").forEach((btn) => btn.onclick = () => submitJob("backfill-embeddings", { limit: 5000, batch_size: 32 }));
+}
+function unique(values) {
+  return Array.from(new Set((values || []).filter(Boolean))).sort();
+}
+function switchTab(tab) {
+  app.tab = tab;
+  document.querySelectorAll("nav button").forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === tab));
+  document.querySelectorAll(".view").forEach((view) => view.classList.toggle("hidden", view.id !== tab));
+  renderCurrent();
+}
+
+$("refreshBtn").onclick = refreshAll;
+$("tabs").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-tab]");
+  if (!button) return;
+  switchTab(button.dataset.tab);
+});
+setInterval(() => {
+  if (app.tab === "ops") refreshAll();
+}, 6000);
+refreshAll();
+</script>
 </body>
 </html>

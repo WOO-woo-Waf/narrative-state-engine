@@ -1,10 +1,13 @@
 param(
   [string]$EnvFile = ".env",
   [string]$HostAddress = "127.0.0.1",
-  [int]$Port = 7860,
+  [int]$Port = 8000,
+  [int]$FrontendPort = 5173,
   [switch]$SkipDatabase,
+  [switch]$StopDatabase,
   [switch]$SkipRemoteEmbedding,
-  [switch]$SkipWeb
+  [switch]$SkipWeb,
+  [switch]$SkipFrontend
 )
 
 $ErrorActionPreference = "Continue"
@@ -33,6 +36,12 @@ function Invoke-Step {
   }
 }
 
+if (-not $SkipFrontend) {
+  Invoke-Step "Stopping frontend workbench" {
+    powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "frontend_workbench\stop.ps1") -HostAddress $HostAddress -Port $FrontendPort
+  }
+}
+
 if (-not $SkipWeb) {
   Invoke-Step "Stopping local web workbench" {
     powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "web_workbench\stop.ps1") -HostAddress $HostAddress -Port $Port
@@ -45,10 +54,14 @@ if (-not $SkipRemoteEmbedding) {
   }
 }
 
-if (-not $SkipDatabase) {
+if ($StopDatabase -and -not $SkipDatabase) {
   Invoke-Step "Stopping local PostgreSQL + pgvector" {
     powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "local_pgvector\stop.ps1")
   }
+} elseif (-not $SkipDatabase) {
+  Write-Host ""
+  Write-Host "==> Local PostgreSQL + pgvector"
+  Write-Host "database is resident; stop_workday leaves it running. Use -StopDatabase only when you really want to stop it."
 }
 
 Write-Host ""

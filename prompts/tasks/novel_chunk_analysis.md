@@ -24,6 +24,7 @@ output_contract: json_object
 
 - 场景状态：地点、时间、氛围、空间压力、场景功能。
 - 人物状态：在场人物、视角人物、目标、情绪、身体状态、知识边界。
+- 角色卡字段必须逐项抽取：身份/别名、外貌、稳定性格、目标、隐藏目标、恐惧或创伤、知识边界、说话方式、动作习惯、决策模式、关系视角。每个非空字段尽量给 field_evidence；证据不足时把字段名写入 missing_fields，不要编造填满。
 - 动作链：人物连续做了什么，动作如何推动场景。
 - 交互关系：对话、冲突、试探、合作、背叛、关系变化。
 - 剧情事件：发生了什么，原因是什么，结果是什么。
@@ -33,6 +34,13 @@ output_contract: json_object
 - 伏笔与未解问题：已埋线索、可能回收方式、禁止提前揭露的信息。
 - 风格特征：叙事视角、句长节奏、对话比例、描写类型、修辞标记、禁用模式。
 - 续写证据：适合后续复用的原文句子、句式模板、场景案例和关键词。
+
+# Source Role Rules
+
+- 如果 source_role 是 primary_story，本片段可以产生主线候选状态：人物卡、人物动态、关系、场景、地点、物品、组织、剧情线、伏笔、设定体系和风格证据。
+- 如果 source_role 不是 primary_story，本片段只能产生 reference-only 信息：风格样例、世界纹理、术语、可迁移设定案例和联动提示。不要把参考书人物写入主线角色状态，不要更新主线当前关系和剧情进度。
+- 所有结论必须带 source_role、confidence、evidence/source_quote 或 retrieval_keywords；证据不足时放入 candidate_character_mentions、open_questions 或 state_completeness.missing_dimensions。
+- 不确定是不是角色的名词，先放 candidate_character_mentions 并标记 quality_flags，不要直接进入 characters。能力名、境界名、资源名、宗门制度和规则名必须进入 setting_concepts。
 
 # Output Contract
 

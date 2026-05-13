@@ -67,6 +67,7 @@ class LLMTokenUsageRecord:
     input_tokens_details: Any = None
     output_tokens_details: Any = None
     usage_raw: Any = None
+    interaction_id: str = ""
     request_id: str = ""
     thread_id: str = ""
     story_id: str = ""
@@ -124,6 +125,7 @@ def record_llm_token_usage(
     usage_raw: Any = None,
     attempt: int = 1,
     max_attempts: int = 1,
+    interaction_id: str = "",
     error: BaseException | None = None,
 ) -> None:
     ctx = LogContext.current()
@@ -177,6 +179,7 @@ def record_llm_token_usage(
         input_tokens_details=_normalize_optional_data(input_tokens_details),
         output_tokens_details=_normalize_optional_data(output_tokens_details),
         usage_raw=_normalize_optional_data(usage_raw),
+        interaction_id=interaction_id or "",
         attempt=max(int(attempt or 1), 1),
         max_attempts=max(int(max_attempts or 1), 1),
         request_id=ctx.request_id,

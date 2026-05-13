@@ -206,19 +206,19 @@
         {
           title: "导入主续写文本",
           task: "ingest-txt",
-          params: { ...common(), file: $("file1").value, title: "target_continuation_1", source_type: "target_continuation", target_chars: 1000, overlap_chars: 160 },
+          params: { ...common(), file: $("file1").value, title: "target_continuation_1", source_type: "target_continuation", target_chars: 1600, overlap_chars: 180 },
           note: "写入 source_documents/source_chunks/evidence，作为主 canon；向量检索使用较小分块。"
         },
         {
           title: "导入风格/世界观参考",
           task: "ingest-txt",
-          params: { ...common(), file: $("file2").value, title: "same_author_world_style_2", source_type: "same_author_world_style", target_chars: 1000, overlap_chars: 160 },
+          params: { ...common(), file: $("file2").value, title: "same_author_world_style_2", source_type: "same_author_world_style", target_chars: 1600, overlap_chars: 180 },
           note: "主要用于风格、叙述节奏和世界观表达参考。"
         },
         {
           title: "导入联动/关系参考",
           task: "ingest-txt",
-          params: { ...common(), file: $("file3").value, title: "crossover_linkage_3", source_type: "crossover_linkage", target_chars: 1000, overlap_chars: 160 },
+          params: { ...common(), file: $("file3").value, title: "crossover_linkage_3", source_type: "crossover_linkage", target_chars: 1600, overlap_chars: 180 },
           note: "主要用于角色联动、关系呼应和交叉剧情参考。"
         },
         {
@@ -230,7 +230,7 @@
         {
           title: "用新分析代码分析主文本",
           task: "analyze-task",
-          params: { ...common(), file: $("file1").value, title: "target_continuation_1", source_type: "target_continuation", llm: true, concurrency: 3, max_chunk_chars: 10000, overlap_chars: 0, persist: true },
+          params: { ...common(), file: $("file1").value, title: "target_continuation_1", source_type: "target_continuation", llm: true, concurrency: 3, max_chunk_chars: 60000, overlap_chars: 0, persist: true },
           note: "产出 NovelStateBible：角色卡、设定体系、剧情线、风格和证据。"
         },
         {

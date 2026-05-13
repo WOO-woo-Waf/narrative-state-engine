@@ -6,8 +6,7 @@ from pathlib import Path
 
 def load_project_env(*, override: bool = False, root: Path | None = None) -> None:
     root = root or Path(__file__).resolve().parents[3]
-    for path in [root / ".env", root / ".env.local"]:
-        _load_env_file(path, override=override)
+    _load_env_file(root / ".env", override=override)
 
 
 def _load_env_file(path: Path, *, override: bool) -> None:

@@ -35,6 +35,12 @@ output_contract: json_object
 - 可检索证据：适合后续续写检索的摘要、原文锚点、关键词、人物和剧情线。
 - 下一章入口：本章最后发展到什么状态，下一章可以承接什么。
 
+# Source Role Rules
+
+- primary_story 章节合并应形成主线章节状态：事件链、场景序列、人物状态变化、关系变化、设定确认、伏笔状态和下一章入口。
+- reference 章节合并只保留参考状态：风格节奏、场景写法、世界纹理、术语和可迁移案例。不要把参考书章节结局当作主线当前进度。
+- 合并同名实体时先看 entity_type/source_role/confidence/evidence；低置信度或跨来源冲突的内容必须标记为 candidate 或 open_question。
+
 # Output Contract
 
 只输出 JSON 对象，字段由用户消息中的 schema 决定。不要输出 Markdown、解释或额外文本。

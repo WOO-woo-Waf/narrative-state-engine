@@ -37,6 +37,8 @@ class StateEditProposal(BaseModel):
     status: str = "draft"
     operations: list[StateEditOperation] = Field(default_factory=list)
     diff: list[dict[str, Any]] = Field(default_factory=list)
+    clarifying_questions: list[dict[str, str]] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     created_at: str = ""
 
@@ -52,12 +54,15 @@ class StateEditEngine:
             raw_author_input=text,
             operations=operations,
             diff=[_operation_diff(state, op) for op in operations],
+            clarifying_questions=_clarifying_questions_for_edit(state, text, operations),
+            open_questions=[],
             notes=[
                 "Natural-language state edit parsed into candidate operations.",
                 "Author-confirmed edits are marked author_locked and should not be overwritten by later analysis.",
             ],
             created_at=datetime.now(timezone.utc).isoformat(),
         )
+        proposal.open_questions = [item["question"] for item in proposal.clarifying_questions]
         state.domain.reports["latest_state_edit_proposal"] = proposal.model_dump(mode="json")
         return proposal
 
@@ -146,6 +151,53 @@ def _operations_from_text(state: NovelAgentState, proposal_id: str, text: str) -
             )
         )
     return operations
+
+
+def _clarifying_questions_for_edit(
+    state: NovelAgentState,
+    text: str,
+    operations: list[StateEditOperation],
+) -> list[dict[str, str]]:
+    questions: list[dict[str, str]] = []
+    if not text.strip():
+        questions.append(
+            {
+                "question_type": "empty_edit",
+                "question": "你想修改哪个状态对象或哪个字段？",
+                "reason": "没有收到可解析的作者修改意见。",
+                "priority": "high",
+            }
+        )
+        return questions
+    if not operations:
+        questions.append(
+            {
+                "question_type": "unparsed_edit",
+                "question": "这条修改意见应该落到角色、关系、场景、世界规则、风格，还是章节蓝图？",
+                "reason": "当前解析器没有生成明确的状态操作。",
+                "priority": "high",
+            }
+        )
+    fallback_world_rules = [op for op in operations if op.target_type == "world_rule"]
+    if fallback_world_rules and len(fallback_world_rules) == len(operations):
+        questions.append(
+            {
+                "question_type": "edit_scope",
+                "question": "这些内容默认会作为世界规则/作者约束保存；是否其实应该写入某个角色卡、关系或章节规划？",
+                "reason": "没有匹配到明确角色名、风格词、剧情线或章节词时，会进入较宽泛的 world_rule。",
+                "priority": "normal",
+            }
+        )
+    if state.domain.characters and not any(op.target_type == "character" for op in operations):
+        questions.append(
+            {
+                "question_type": "character_scope",
+                "question": "这次修改是否需要绑定到具体角色卡？如果需要，请写出角色名和字段。",
+                "reason": "当前修改未命中已有角色名，可能无法落到角色卡字段。",
+                "priority": "normal",
+            }
+        )
+    return questions[:4]
 
 
 def _operation_diff(state: NovelAgentState, op: StateEditOperation) -> dict[str, Any]:

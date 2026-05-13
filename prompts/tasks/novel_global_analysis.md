@@ -25,6 +25,7 @@ output_contract: json_object
 
 - 任务级故事摘要。
 - 角色卡：身份、目标、恐惧、知识边界、说话方式、动作习惯、行为禁区。
+- 角色卡不得只填摘要。每张主线角色卡至少尝试覆盖：identity_tags、appearance_profile、stable_traits、current_goals、knowledge_boundary、voice_profile、gesture_patterns、decision_patterns、relationship_views。无法从原文确认的字段写入 missing_fields，并在 field_confidence 中给低分。
 - 关系图：人物之间的公开关系、私下关系、信任、张力、未解冲突。
 - 剧情线：主线、支线、阶段、 stakes、开放问题、下一步可能推进。
 - 时间线：重要事件顺序和状态变化。
@@ -33,10 +34,17 @@ output_contract: json_object
 - 概念合并：跨章节重复出现的设定术语要归并；概念定义、运转规则、限制条件、等级关系要分开；不确定设定标记为 candidate。
 - 实体边界：不要把“灵根、筑基、功法、灵石、宗门制度、契约规则”等设定概念当成角色。
 - 伏笔状态：已埋、已回收、未回收、不可提前揭露。
+- 关系、场景、伏笔是必填维度：即使信息不足，也要输出 open_question/state_completeness 缺口，不能静默省略。
 - 风格圣经：叙事视角、句长、段落节奏、对话比例、描写类型、修辞、禁用风格。
 - 场景案例库：冲突功能、情绪曲线、动作模板、对话模板、结尾钩子。
 - 检索索引建议：应该写入向量库的证据类型、摘要文本、关键词、相关实体。
 - 续写硬约束：后续生成不能破坏的人物、关系、世界和剧情事实。
+
+# Source Role Rules
+
+- primary_story 是当前要续写的小说，只有它能直接生成主线 canonical/candidate 状态。
+- same_world_reference、crossover_reference、style_reference 等材料只能进入 reference-only 候选集，除非作者后续显式提升。它们可以提供风格、世界纹理、术语、场景案例和联动线索，但不得覆盖 primary_story 的人物当前状态、关系图、剧情阶段和章节入口。
+- 全局合并要为每个重要对象保留 source_type/source_role、confidence、source_span_ids 或 evidence。存在跨来源冲突时，保留冲突说明，不要强行合并。
 
 # Output Contract
 

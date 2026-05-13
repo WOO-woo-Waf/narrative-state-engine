@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import os
 import re
 
 from narrative_state_engine.analysis.models import TextChunk
+
+
+DEFAULT_ANALYSIS_CHUNK_CHARS = 60_000
+DEFAULT_ANALYSIS_OVERLAP_CHARS = 0
 
 
 _CHAPTER_HEADING_RE = re.compile(
@@ -24,11 +29,13 @@ class TextChunker:
     def __init__(
         self,
         *,
-        max_chunk_chars: int = 1800,
-        overlap_chars: int = 240,
+        max_chunk_chars: int | None = None,
+        overlap_chars: int | None = None,
         min_chunk_chars: int = 240,
         hard_chunk_chars: int | None = None,
     ) -> None:
+        max_chunk_chars = _env_int("NOVEL_AGENT_ANALYSIS_MAX_CHUNK_CHARS", DEFAULT_ANALYSIS_CHUNK_CHARS) if max_chunk_chars is None else max_chunk_chars
+        overlap_chars = _env_int("NOVEL_AGENT_ANALYSIS_CHUNK_OVERLAP_CHARS", DEFAULT_ANALYSIS_OVERLAP_CHARS) if overlap_chars is None else overlap_chars
         self.target_chunk_chars = max(400, int(max_chunk_chars))
         self.overlap_chars = max(0, min(int(overlap_chars), self.target_chunk_chars - 100))
         self.min_chunk_chars = max(80, int(min_chunk_chars))
@@ -254,3 +261,10 @@ class TextChunker:
             previous.end_offset = tail.end_offset
             return chunks[:-1]
         return chunks
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except Exception:
+        return default

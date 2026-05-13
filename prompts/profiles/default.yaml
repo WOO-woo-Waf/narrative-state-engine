@@ -9,3 +9,7 @@ bindings:
   novel_chapter_analysis: novel_chapter_analysis
   novel_global_analysis: novel_global_analysis
   author_dialogue_planning: author_dialogue_planning
+  dialogue_audit_planning: dialogue_audit_planning
+  dialogue_plot_planning: dialogue_plot_planning
+  dialogue_generation_planning: dialogue_generation_planning
+  dialogue_generic_tool_planning: dialogue_generic_tool_planning

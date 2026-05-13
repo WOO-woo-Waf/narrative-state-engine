@@ -15,8 +15,7 @@ DEFAULT_CHECKPOINT_NAMESPACE = "novel_agent"
 
 
 def bootstrap_env() -> None:
-    for env_path in (PROJECT_ROOT / ".env", PROJECT_ROOT / ".env.local"):
-        _bootstrap_single_env_file(env_path)
+    _bootstrap_single_env_file(PROJECT_ROOT / ".env")
 
 
 def _bootstrap_single_env_file(env_path: Path) -> None:

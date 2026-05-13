@@ -51,6 +51,28 @@ from narrative_state_engine.domain.models import (
     WorldState,
 )
 from narrative_state_engine.domain.state_editing import StateEditEngine, StateEditOperation, StateEditProposal
+from narrative_state_engine.domain.state_review import StateCompletenessEvaluator
+from narrative_state_engine.domain.environment import (
+    ActionRiskLevel,
+    ConfirmationPolicy,
+    DialogueActionRecord,
+    DialogueMessageRecord,
+    DialogueSessionRecord,
+    SceneType,
+    StateEnvironment,
+    TaskType,
+)
+from narrative_state_engine.domain.state_objects import (
+    SourceSpanRecord,
+    StateAuthority,
+    StateCandidateItemRecord,
+    StateCandidateSetRecord,
+    StateEvidenceLinkRecord,
+    StateObjectRecord,
+    StateObjectVersionRecord,
+    StateReviewRunRecord,
+    StateTransitionRecord,
+)
 __all__ = [
     "AuthorConstraint",
     "AuthorIntent",
@@ -98,6 +120,24 @@ __all__ = [
     "StateEditEngine",
     "StateEditOperation",
     "StateEditProposal",
+    "StateCompletenessEvaluator",
+    "ActionRiskLevel",
+    "ConfirmationPolicy",
+    "DialogueActionRecord",
+    "DialogueMessageRecord",
+    "DialogueSessionRecord",
+    "SceneType",
+    "StateEnvironment",
+    "TaskType",
+    "SourceSpanRecord",
+    "StateAuthority",
+    "StateCandidateItemRecord",
+    "StateCandidateSetRecord",
+    "StateEvidenceLinkRecord",
+    "StateObjectRecord",
+    "StateObjectVersionRecord",
+    "StateReviewRunRecord",
+    "StateTransitionRecord",
     "SystemRank",
     "TechniqueOrSkill",
     "TerminologyEntry",

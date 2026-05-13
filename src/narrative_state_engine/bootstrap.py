@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from narrative_state_engine.analysis import AnalysisRunResult, SnippetType
+from narrative_state_engine.analysis.identity import normalize_analysis_result_identities
 from narrative_state_engine.domain import (
     CharacterCard,
     CharacterDynamicState,
@@ -8,10 +9,14 @@ from narrative_state_engine.domain import (
     ForeshadowingState,
     GraphEdge,
     GraphNode,
+    LocationState,
     NarrativeEvent,
+    ObjectState,
+    OrganizationState,
     PlotThreadState,
     PowerSystem,
     ResourceConcept,
+    RelationshipState,
     RuleMechanism,
     SceneAtmosphere,
     SceneState,
@@ -75,6 +80,7 @@ def _find_plot_thread(state: NovelAgentState, *, thread_id: str, name: str) -> P
 
 
 def apply_analysis_to_state(state: NovelAgentState, analysis: AnalysisRunResult) -> None:
+    normalize_analysis_result_identities(analysis)
     global_state = analysis.global_story_state.model_dump(mode="json") if analysis.global_story_state else {}
     profile = analysis.story_bible.style_profile
     state.style.sentence_length_distribution = dict(profile.sentence_length_distribution)
@@ -302,6 +308,8 @@ def _apply_analysis_to_domain_state(state: NovelAgentState, analysis: AnalysisRu
     locked_resource_concepts = [item for item in state.domain.resource_concepts if item.author_locked]
     locked_rule_mechanisms = [item for item in state.domain.rule_mechanisms if item.author_locked]
     locked_terminology = [item for item in state.domain.terminology if item.author_locked]
+    locked_relationships = [item for item in state.domain.relationships if item.author_locked]
+    locked_foreshadowing = [item for item in state.domain.foreshadowing if item.author_locked]
     document_id = f"source-{analysis.story_id}"
     state.domain.source_documents = [
         SourceDocument(
@@ -413,6 +421,18 @@ def _apply_analysis_to_domain_state(state: NovelAgentState, analysis: AnalysisRu
     state.domain.terminology = _merge_author_locked_by_id(locked_terminology, state.domain.terminology)
     if global_state:
         state.domain.world.setting_summary = global_state.story_synopsis[:600]
+        state.domain.relationships = _merge_author_locked_by_id(
+            locked_relationships,
+            _relationships_from_global(global_state.relationship_graph),
+        )
+        state.domain.locations = _locations_from_global(global_state.locations)
+        state.domain.objects = _objects_from_global(global_state.objects)
+        state.domain.organizations = _organizations_from_global(global_state.organizations)
+        state.domain.foreshadowing = _merge_author_locked_by_id(
+            locked_foreshadowing,
+            _foreshadowing_from_global(global_state.foreshadowing_states),
+        )
+        state.domain.reports["analysis_state_completeness"] = dict(global_state.state_completeness)
 
     incoming_characters = [
         CharacterCard(
@@ -433,6 +453,10 @@ def _apply_analysis_to_domain_state(state: NovelAgentState, analysis: AnalysisRu
             dialogue_do_not=list(card.dialogue_do_not),
             gesture_patterns=list(card.gesture_patterns),
             decision_patterns=list(card.decision_patterns),
+            field_evidence={str(key): list(value) for key, value in card.field_evidence.items()},
+            field_confidence=dict(card.field_confidence),
+            missing_fields=list(card.missing_fields),
+            quality_flags=list(card.quality_flags),
             forbidden_actions=list(card.forbidden_actions),
             source_span_ids=[],
             confidence=card.confidence,
@@ -525,7 +549,13 @@ def _apply_analysis_to_domain_state(state: NovelAgentState, analysis: AnalysisRu
                     reveal_policy="do_not_reveal_before_author_plan",
                 )
             )
-    state.domain.foreshadowing = foreshadowing[:80]
+    state.domain.foreshadowing = _merge_author_locked_by_id(
+        locked_foreshadowing,
+        _merge_domain_items_by_id(
+            [*state.domain.foreshadowing, *_foreshadowing_from_chapters(analysis), *foreshadowing],
+            limit=120,
+        ),
+    )
     state.domain.style_profile = StyleProfile(
         profile_id=f"style-{analysis.story_id}",
         narrative_pov=analysis.story_bible.style_profile.narrative_pov or state.style.narrative_pov,
@@ -701,6 +731,36 @@ def _apply_analysis_to_domain_state(state: NovelAgentState, analysis: AnalysisRu
 def _build_domain_scenes(state: NovelAgentState, analysis: AnalysisRunResult) -> list[SceneState]:
     scenes: list[SceneState] = []
     for chapter in analysis.chapter_states:
+        if chapter.scene_sequence:
+            for idx, raw in enumerate(chapter.scene_sequence[:12], start=1):
+                if not isinstance(raw, dict):
+                    continue
+                scene_id = str(raw.get("scene_id") or f"scene-ch{chapter.chapter_index}-{idx:03d}")
+                location = str(raw.get("location") or raw.get("location_id") or "")
+                characters = [str(item) for item in raw.get("characters", [])] if isinstance(raw.get("characters"), list) else []
+                scenes.append(
+                    SceneState(
+                        scene_id=scene_id,
+                        chapter_index=chapter.chapter_index,
+                        scene_index=idx,
+                        scene_type=str(raw.get("scene_type") or "source_scene"),
+                        location_id=_location_id_from_marker(location),
+                        pov_character_id=characters[0] if characters else state.chapter.pov_character_id or "",
+                        entry_state=str(raw.get("goal") or raw.get("entry_state") or "")[:240],
+                        exit_state=str(raw.get("outcome") or raw.get("exit_state") or "")[:240],
+                        objective=str(raw.get("goal") or chapter.chapter_summary)[:240],
+                        conflict_id=str(raw.get("conflict") or ""),
+                        involved_characters=characters,
+                        beats=[
+                            str(item)
+                            for item in raw.get("beats", [])
+                        ][:8] if isinstance(raw.get("beats"), list) else [str(raw.get("outcome") or "")],
+                        emotional_curve=[str(item) for item in raw.get("emotional_curve", [])][:6]
+                        if isinstance(raw.get("emotional_curve"), list)
+                        else ["build", "hold", "open"],
+                    )
+                )
+            continue
         markers = list(chapter.scene_markers) or [chapter.chapter_title or f"chapter-{chapter.chapter_index}"]
         for idx, marker in enumerate(markers[:8], start=1):
             beats = list(chapter.chapter_events[:3]) + list(chapter.plot_progress[:2])
@@ -724,6 +784,145 @@ def _build_domain_scenes(state: NovelAgentState, analysis: AnalysisRunResult) ->
                 )
             )
     return scenes
+
+
+def _relationships_from_global(rows: list[dict]) -> list[RelationshipState]:
+    relationships: list[RelationshipState] = []
+    for idx, raw in enumerate(rows or [], start=1):
+        source = str(raw.get("source") or raw.get("source_character_id") or "").strip()
+        target = str(raw.get("target") or raw.get("target_character_id") or "").strip()
+        if not source or not target:
+            continue
+        relationships.append(
+            RelationshipState(
+                relationship_id=str(raw.get("relationship_id") or f"rel-{idx:03d}-{_id_token(source)}-{_id_token(target)}"),
+                source_character_id=source,
+                target_character_id=target,
+                relationship_type=str(raw.get("relationship_type") or ""),
+                public_status=str(raw.get("public_status") or ""),
+                private_status=str(raw.get("private_status") or ""),
+                trust_level=_float(raw.get("trust_level"), 0.0),
+                tension_level=_float(raw.get("tension_level") or raw.get("tension"), 0.0),
+                emotional_tags=[str(item) for item in raw.get("emotional_tags", [])] if isinstance(raw.get("emotional_tags"), list) else [],
+                unresolved_conflicts=[
+                    str(item) for item in raw.get("unresolved_conflicts", [])
+                ] if isinstance(raw.get("unresolved_conflicts"), list) else [],
+                confidence=_float(raw.get("confidence"), 0.7),
+                status=str(raw.get("status") or "candidate"),
+                source_type=str(raw.get("source_type") or "analysis"),
+                updated_by=str(raw.get("updated_by") or "analysis"),
+                author_locked=bool(raw.get("author_locked", False)),
+            )
+        )
+    return relationships
+
+
+def _locations_from_global(rows: list[dict]) -> list[LocationState]:
+    items: list[LocationState] = []
+    for idx, raw in enumerate(rows or [], start=1):
+        name = str(raw.get("name") or raw.get("location") or "").strip()
+        if not name:
+            continue
+        items.append(
+            LocationState(
+                location_id=str(raw.get("location_id") or f"loc-{idx:03d}-{_id_token(name)}"),
+                name=name,
+                aliases=[str(item) for item in raw.get("aliases", [])] if isinstance(raw.get("aliases"), list) else [],
+                location_type=str(raw.get("location_type") or ""),
+                description_profile=[str(item) for item in raw.get("description_profile", [])] if isinstance(raw.get("description_profile"), list) else [str(raw.get("description") or "")],
+                atmosphere_tags=[str(item) for item in raw.get("atmosphere_tags", [])] if isinstance(raw.get("atmosphere_tags"), list) else [],
+                known_events=[str(item) for item in raw.get("known_events", [])] if isinstance(raw.get("known_events"), list) else [],
+                secrets=[str(item) for item in raw.get("secrets", [])] if isinstance(raw.get("secrets"), list) else [],
+            )
+        )
+    return items
+
+
+def _objects_from_global(rows: list[dict]) -> list[ObjectState]:
+    items: list[ObjectState] = []
+    for idx, raw in enumerate(rows or [], start=1):
+        name = str(raw.get("name") or "").strip()
+        if not name:
+            continue
+        items.append(
+            ObjectState(
+                object_id=str(raw.get("object_id") or f"obj-{idx:03d}-{_id_token(name)}"),
+                name=name,
+                object_type=str(raw.get("object_type") or ""),
+                owner_character_id=str(raw.get("owner_character_id") or raw.get("owner") or ""),
+                current_location_id=str(raw.get("current_location_id") or ""),
+                functions=[str(item) for item in raw.get("functions", [])] if isinstance(raw.get("functions"), list) else [str(raw.get("function") or "")],
+                plot_relevance=[str(item) for item in raw.get("plot_relevance", [])] if isinstance(raw.get("plot_relevance"), list) else [],
+            )
+        )
+    return items
+
+
+def _organizations_from_global(rows: list[dict]) -> list[OrganizationState]:
+    items: list[OrganizationState] = []
+    for idx, raw in enumerate(rows or [], start=1):
+        name = str(raw.get("name") or "").strip()
+        if not name:
+            continue
+        items.append(
+            OrganizationState(
+                organization_id=str(raw.get("organization_id") or f"org-{idx:03d}-{_id_token(name)}"),
+                name=name,
+                organization_type=str(raw.get("organization_type") or ""),
+                goals=[str(item) for item in raw.get("goals", [])] if isinstance(raw.get("goals"), list) else [],
+                methods=[str(item) for item in raw.get("methods", [])] if isinstance(raw.get("methods"), list) else [],
+                known_members=[str(item) for item in raw.get("known_members", [])] if isinstance(raw.get("known_members"), list) else [],
+                relationship_to_characters=dict(raw.get("relationship_to_characters") or {}),
+                secrets=[str(item) for item in raw.get("secrets", [])] if isinstance(raw.get("secrets"), list) else [],
+            )
+        )
+    return items
+
+
+def _foreshadowing_from_global(rows: list[dict]) -> list[ForeshadowingState]:
+    items: list[ForeshadowingState] = []
+    for idx, raw in enumerate(rows or [], start=1):
+        if not isinstance(raw, dict):
+            raw = {"seed_text": str(raw)}
+        seed = str(raw.get("seed_text") or raw.get("text") or "").strip()
+        if not seed:
+            continue
+        items.append(
+            ForeshadowingState(
+                foreshadowing_id=str(raw.get("foreshadowing_id") or f"global-foreshadow-{idx:03d}"),
+                seed_text=seed,
+                planted_at_chapter=_optional_int(raw.get("planted_at_chapter")),
+                expected_payoff_chapter=_optional_int(raw.get("expected_payoff_chapter")),
+                status=str(raw.get("status") or "candidate"),
+                reveal_policy=str(raw.get("reveal_policy") or "do_not_reveal_before_author_plan"),
+                confidence=_float(raw.get("confidence"), 0.7),
+                source_type=str(raw.get("source_type") or "analysis"),
+                updated_by=str(raw.get("updated_by") or "analysis"),
+                author_locked=bool(raw.get("author_locked", False)),
+            )
+        )
+    return items[:120]
+
+
+def _foreshadowing_from_chapters(analysis: AnalysisRunResult) -> list[ForeshadowingState]:
+    rows = []
+    for chapter in analysis.chapter_states:
+        chapter_rows = list(chapter.foreshadowing) + [{"seed_text": item} for item in chapter.open_questions]
+        for idx, raw in enumerate(chapter_rows, start=1):
+            if not isinstance(raw, dict):
+                raw = {"seed_text": str(raw)}
+            seed = str(raw.get("seed_text") or raw.get("summary") or raw).strip()
+            if seed:
+                rows.append(
+                    ForeshadowingState(
+                        foreshadowing_id=f"analysis-ch{chapter.chapter_index}-foreshadow-extra-{idx:03d}",
+                        seed_text=seed,
+                        planted_at_chapter=chapter.chapter_index,
+                        status=str(raw.get("status") or "candidate"),
+                        reveal_policy=str(raw.get("reveal_policy") or "do_not_reveal_before_author_plan"),
+                    )
+                )
+    return rows[:120]
 
 
 def _location_id_from_marker(marker: str) -> str:
@@ -793,12 +992,63 @@ def _merge_author_locked_characters(existing: list[CharacterCard], incoming: lis
 
 
 def _merge_author_locked_by_id(locked: list, incoming: list) -> list:
-    rows = {getattr(item, "concept_id", getattr(item, "rule_id", "")): item for item in incoming}
+    rows = {_identity_key(item): item for item in incoming if _identity_key(item)}
     for item in locked:
-        key = getattr(item, "concept_id", getattr(item, "rule_id", ""))
+        key = _identity_key(item)
         if key:
             rows[key] = item
     return list(rows.values())
+
+
+def _merge_domain_items_by_id(items: list, *, limit: int | None = None) -> list:
+    rows: dict[str, object] = {}
+    for item in items:
+        key = _identity_key(item)
+        if not key or key in rows:
+            continue
+        rows[key] = item
+        if limit is not None and len(rows) >= limit:
+            break
+    return list(rows.values())
+
+
+def _identity_key(item) -> str:
+    for attr in (
+        "concept_id",
+        "rule_id",
+        "relationship_id",
+        "character_id",
+        "thread_id",
+        "location_id",
+        "object_id",
+        "organization_id",
+        "foreshadowing_id",
+    ):
+        value = getattr(item, attr, "")
+        if value:
+            return str(value)
+    name = getattr(item, "name", "")
+    return str(name or "")
+
+
+def _id_token(value: str) -> str:
+    return "".join(ch for ch in str(value)[:24] if ch.isalnum() or "\u4e00" <= ch <= "\u9fff") or "item"
+
+
+def _optional_int(value) -> int | None:
+    try:
+        if value in {None, ""}:
+            return None
+        return int(value)
+    except Exception:
+        return None
+
+
+def _float(value, default: float) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
 
 
 def _concept_payload(payload: dict, *, extra_keys: set[str] | None = None) -> dict:

@@ -280,6 +280,10 @@ class CharacterCard(BaseModel):
     gesture_patterns: list[str] = Field(default_factory=list)
     decision_patterns: list[str] = Field(default_factory=list)
     relationship_views: dict[str, str] = Field(default_factory=dict)
+    field_evidence: dict[str, list[str]] = Field(default_factory=dict)
+    field_confidence: dict[str, float] = Field(default_factory=dict)
+    missing_fields: list[str] = Field(default_factory=list)
+    quality_flags: list[str] = Field(default_factory=list)
     arc_stage: str = ""
     allowed_changes: list[str] = Field(default_factory=list)
     forbidden_actions: list[str] = Field(default_factory=list)
@@ -592,6 +596,13 @@ class CompressedMemoryBlock(BaseModel):
     dropped_ids: list[str] = Field(default_factory=list)
     compression_ratio: float = 0.0
     valid_until_state_version: int | None = None
+    depends_on_object_ids: list[str] = Field(default_factory=list)
+    depends_on_field_paths: list[str] = Field(default_factory=list)
+    depends_on_state_version_no: int | None = None
+    source_evidence_ids: list[str] = Field(default_factory=list)
+    source_branch_ids: list[str] = Field(default_factory=list)
+    validity_status: str = "valid"
+    invalidated_by_transition_ids: list[str] = Field(default_factory=list)
 
 
 class MemoryCompressionState(BaseModel):

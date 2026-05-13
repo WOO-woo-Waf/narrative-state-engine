@@ -1,7 +1,8 @@
 param(
   [string]$EnvFile = ".env",
   [int]$TimeoutSeconds = 420,
-  [int]$PollSeconds = 3
+  [int]$PollSeconds = 3,
+  [switch]$Foreground
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,9 +54,13 @@ if (Test-EmbeddingHealth -BaseUrl $baseUrl) {
   exit 0
 }
 
-$remoteScript = "cd $serviceDir && CUDA_VISIBLE_DEVICES=$cudaDevices ./run_server.sh"
+$remoteScript = "cd '$serviceDir' && nohup env CUDA_VISIBLE_DEVICES='$cudaDevices' ./run_server.sh > run_server.nohup.log 2>&1 < /dev/null &"
 Write-Host "starting remote embedding service on $sshHost ..."
-ssh -o BatchMode=yes $sshHost $remoteScript
+if ($Foreground) {
+  ssh -o BatchMode=yes $sshHost "cd '$serviceDir' && CUDA_VISIBLE_DEVICES='$cudaDevices' ./run_server.sh"
+} else {
+  ssh -o BatchMode=yes $sshHost "bash -lc `"$remoteScript`""
+}
 
 $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 while ((Get-Date) -lt $deadline) {

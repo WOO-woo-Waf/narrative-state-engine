@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 from narrative_state_engine.domain import (
@@ -8,6 +9,7 @@ from narrative_state_engine.domain import (
     RetrievalContextSection,
     WorkingMemoryContext,
 )
+from narrative_state_engine.llm.generation_context import DEFAULT_GENERATION_CONTEXT_BUDGET
 from narrative_state_engine.models import NovelAgentState
 
 
@@ -24,12 +26,18 @@ DEFAULT_SECTION_BUDGETS = {
 
 @dataclass
 class RetrievalContextAssembler:
-    token_budget: int = 4800
+    token_budget: int = DEFAULT_GENERATION_CONTEXT_BUDGET
     section_budgets: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_SECTION_BUDGETS))
 
     def assemble(self, state: NovelAgentState, evidence_pack: EvidencePack | None = None) -> WorkingMemoryContext:
         pack = evidence_pack or state.domain.evidence_pack
-        budget = max(int(self.token_budget), 800)
+        configured = (
+            state.metadata.get("retrieval_token_budget")
+            or state.metadata.get("generation_context_budget")
+            or os.getenv("NOVEL_AGENT_GENERATION_CONTEXT_BUDGET")
+            or self.token_budget
+        )
+        budget = max(int(configured), 800)
         section_budgets = self._normalized_budgets(budget)
 
         sections = [

@@ -142,6 +142,90 @@ class EvidencePackBuilder:
                 )
             )
 
+        for character in state.domain.characters[:80]:
+            text = "；".join(
+                part
+                for part in [
+                    character.name,
+                    "身份:" + ",".join(character.identity_tags[:4]) if character.identity_tags else "",
+                    "性格:" + ",".join(character.stable_traits[:4]) if character.stable_traits else "",
+                    "目标:" + ",".join(character.current_goals[:4]) if character.current_goals else "",
+                    "知识边界:" + ",".join(character.knowledge_boundary[:4]) if character.knowledge_boundary else "",
+                    "口吻:" + ",".join(character.voice_profile[:4]) if character.voice_profile else "",
+                    "禁区:" + ",".join((character.dialogue_do_not + character.forbidden_actions + character.forbidden_changes)[:4])
+                    if (character.dialogue_do_not or character.forbidden_actions or character.forbidden_changes)
+                    else "",
+                ]
+                if part
+            )
+            pack.character_evidence.append(
+                NarrativeEvidence(
+                    evidence_id=character.character_id,
+                    evidence_type="character_card",
+                    source="domain_state",
+                    text=text,
+                    usage_hint="character_state_constraint",
+                    related_entities=[character.character_id, character.name],
+                    score_structural=0.8,
+                    final_score=0.8,
+                    metadata=character.model_dump(mode="json"),
+                )
+            )
+
+        for relationship in state.domain.relationships[:80]:
+            text = (
+                f"{relationship.source_character_id}->{relationship.target_character_id}: "
+                f"公开={relationship.public_status}; 私下={relationship.private_status}; "
+                f"冲突={','.join(relationship.unresolved_conflicts[:4])}"
+            )
+            pack.character_evidence.append(
+                NarrativeEvidence(
+                    evidence_id=relationship.relationship_id,
+                    evidence_type="relationship_state",
+                    source="domain_state",
+                    text=text,
+                    usage_hint="relationship_constraint",
+                    related_entities=[relationship.source_character_id, relationship.target_character_id],
+                    final_score=0.78,
+                    metadata=relationship.model_dump(mode="json"),
+                )
+            )
+
+        for scene in state.domain.scenes[:120]:
+            pack.scene_case_evidence.append(
+                NarrativeEvidence(
+                    evidence_id=scene.scene_id,
+                    evidence_type="scene_state",
+                    source="domain_state",
+                    text=(
+                        f"chapter={scene.chapter_index}; location={scene.location_id}; "
+                        f"目标={scene.objective}; 入场={scene.entry_state}; 出场={scene.exit_state}; "
+                        f"beats={','.join(scene.beats[:5])}"
+                    ),
+                    usage_hint="scene_environment_state",
+                    related_entities=list(scene.involved_characters),
+                    chapter_index=scene.chapter_index,
+                    final_score=0.76,
+                    metadata=scene.model_dump(mode="json"),
+                )
+            )
+
+        for item in state.domain.foreshadowing[:80]:
+            pack.plot_evidence.append(
+                NarrativeEvidence(
+                    evidence_id=item.foreshadowing_id,
+                    evidence_type="foreshadowing",
+                    source="domain_state",
+                    text=f"{item.seed_text}; status={item.status}; reveal_policy={item.reveal_policy}",
+                    usage_hint="foreshadowing_constraint",
+                    related_entities=list(item.related_character_ids),
+                    related_plot_threads=list(item.related_plot_thread_ids),
+                    chapter_index=item.planted_at_chapter,
+                    final_score=0.74,
+                    metadata=item.model_dump(mode="json"),
+                )
+            )
+
         for block in state.domain.compressed_memory[:12]:
             pack.plot_evidence.append(
                 NarrativeEvidence(

@@ -19,6 +19,17 @@ def test_chunker_splits_by_chapter_heading_and_paragraph_budget():
     assert all(not item.text.startswith(" ") for item in chunks)
 
 
+def test_chunker_default_budget_is_large_context_oriented(monkeypatch):
+    monkeypatch.setenv("NOVEL_AGENT_ANALYSIS_MAX_CHUNK_CHARS", "60000")
+    monkeypatch.setenv("NOVEL_AGENT_ANALYSIS_CHUNK_OVERLAP_CHARS", "0")
+    text = "\n\n".join(f"第{i}段，仍然属于同一个长上下文分析块。" * 20 for i in range(80))
+
+    chunks = TextChunker().chunk(text)
+
+    assert len(chunks) == 1
+    assert len(chunks[0].text) > 10_000
+
+
 def test_chunker_keeps_short_paragraphs_together_instead_of_fixed_slicing():
     paragraphs = [f"第{i}段，人物在同一个场景里继续说话。" * 4 for i in range(8)]
     text = "\n\n".join(paragraphs)

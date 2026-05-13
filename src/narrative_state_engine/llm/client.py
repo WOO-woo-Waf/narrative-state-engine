@@ -18,6 +18,10 @@ from narrative_state_engine.logging.token_usage import record_llm_token_usage
 logger = get_logger()
 
 
+class EmptyJSONModeResponse(RuntimeError):
+    """Raised when a JSON-mode provider returns no content."""
+
+
 @dataclass(frozen=True)
 class NovelLLMConfig:
     api_base: str = ""
@@ -106,7 +110,7 @@ class OpenAITextLLM(BaseLLM):
         elif extra_body:
             request_kwargs["extra_body"] = extra_body
 
-        resolved_stream = resolve_stream_flag(stream=stream, tools=tools)
+        resolved_stream = False if json_mode and stream is None else resolve_stream_flag(stream=stream, tools=tools)
         if resolved_stream:
             content_parts: list[str] = []
             usage: dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -187,6 +191,7 @@ def unified_text_llm(messages: list[dict[str, Any]], **kwargs: Any) -> Any:
 
     endpoints = _resolve_endpoints(config=config, kwargs=kwargs)
     model_name = kwargs.pop("model_name", None) or config.model_name
+    kwargs.setdefault("max_tokens", _default_max_tokens(config=config, json_mode=bool(kwargs.get("json_mode"))))
     if _deepseek_thinking_enabled(config=config, model_name=model_name):
         kwargs.setdefault("thinking_mode", {"type": "enabled"})
         if config.reasoning_effort:
@@ -197,7 +202,12 @@ def unified_text_llm(messages: list[dict[str, Any]], **kwargs: Any) -> Any:
     base_backoff_s = float(kwargs.pop("base_backoff_s", 0.6) or 0.6)
     purpose = kwargs.pop("purpose", None)
     interaction_context = kwargs.pop("interaction_context", None)
+    json_mode_enabled = bool(kwargs.get("json_mode"))
+    if json_mode_enabled:
+        kwargs.setdefault("stream", False)
     requested_stream = resolve_stream_flag(kwargs.get("stream"), kwargs.get("tools"))
+    if json_mode_enabled:
+        messages = _ensure_json_mode_prompt_contract(messages)
     timeout = kwargs.pop("timeout", None)
     if timeout is None:
         kwargs["timeout"] = float(config.timeout_s)
@@ -251,6 +261,10 @@ def unified_text_llm(messages: list[dict[str, Any]], **kwargs: Any) -> Any:
             try:
                 resp = client.chat(messages, return_metadata=True, **kwargs)
                 call_result = _coerce_call_result(resp, default_stream=requested_stream)
+                if json_mode_enabled and not str(call_result.value or "").strip():
+                    raise EmptyJSONModeResponse(
+                        "JSON mode returned empty content; retrying because providers may occasionally emit blank output."
+                    )
                 duration_ms = _duration_ms(started_at)
                 _record_token_usage(
                     model_name=model_name,
@@ -260,6 +274,7 @@ def unified_text_llm(messages: list[dict[str, Any]], **kwargs: Any) -> Any:
                     started_at=started_at,
                     attempt=attempt + 1,
                     max_attempts=max_attempts,
+                    interaction_id=interaction_id,
                 )
                 response_summary = summarize_response(call_result.value)
                 record_llm_interaction(
@@ -305,6 +320,7 @@ def unified_text_llm(messages: list[dict[str, Any]], **kwargs: Any) -> Any:
                     error=exc,
                     attempt=attempt + 1,
                     max_attempts=max_attempts,
+                    interaction_id=interaction_id,
                 )
                 record_llm_interaction(
                     interaction_id=interaction_id,
@@ -452,6 +468,33 @@ def _deepseek_thinking_enabled(*, config: NovelLLMConfig, model_name: str) -> bo
     return (model_name or "").strip().lower().startswith("deepseek-v4")
 
 
+def _default_max_tokens(*, config: NovelLLMConfig, json_mode: bool) -> int:
+    if not json_mode:
+        return int(config.max_tokens)
+    raw = os.getenv("NOVEL_AGENT_LLM_JSON_MAX_TOKENS", "").strip()
+    try:
+        configured = int(raw) if raw else 4096
+    except Exception:
+        configured = 4096
+    return max(int(config.max_tokens), configured)
+
+
+def _ensure_json_mode_prompt_contract(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    reminder = (
+        "\n\nJSON mode contract: output exactly one valid json object. "
+        "Do not output markdown, code fences, comments, or blank content. "
+        'Minimal example: {"ok": true}.'
+    )
+    rows = [dict(item) for item in messages]
+    for item in rows:
+        if str(item.get("role", "")) == "system":
+            content = str(item.get("content", ""))
+            if "json mode contract" not in content.lower():
+                item["content"] = content + reminder
+            return rows
+    return [{"role": "system", "content": reminder.strip()}] + rows
+
+
 def _normalize_str_list(value: Any) -> list[str]:
     if value is None:
         return []
@@ -519,6 +562,7 @@ def _record_token_usage(
     started_at: float,
     attempt: int,
     max_attempts: int,
+    interaction_id: str,
 ) -> None:
     usage = call_result.usage or {}
     record_llm_token_usage(
@@ -544,6 +588,7 @@ def _record_token_usage(
         usage_raw=usage.get("usage_raw"),
         attempt=attempt,
         max_attempts=max_attempts,
+        interaction_id=interaction_id,
     )
 
 
@@ -557,6 +602,7 @@ def _record_token_usage_error(
     error: BaseException,
     attempt: int,
     max_attempts: int,
+    interaction_id: str,
 ) -> None:
     record_llm_token_usage(
         model_family="text",
@@ -568,6 +614,7 @@ def _record_token_usage_error(
         duration_ms=_duration_ms(started_at),
         attempt=attempt,
         max_attempts=max_attempts,
+        interaction_id=interaction_id,
         error=error,
     )
 
@@ -577,6 +624,8 @@ def _duration_ms(started_at: float) -> int:
 
 
 def _is_transient_error(err: BaseException) -> bool:
+    if isinstance(err, EmptyJSONModeResponse):
+        return True
     status = getattr(err, "status_code", None)
     try:
         status = int(status) if status is not None else None

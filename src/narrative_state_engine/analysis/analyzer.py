@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Iterable
 
 from narrative_state_engine.analysis.chunker import TextChunker
+from narrative_state_engine.analysis.chunker import DEFAULT_ANALYSIS_CHUNK_CHARS, DEFAULT_ANALYSIS_OVERLAP_CHARS
 from narrative_state_engine.analysis.merging import StoryBibleMerger, StyleProfileAggregator
 from narrative_state_engine.analysis.models import (
     AnalysisRunResult,
@@ -55,8 +56,8 @@ class NovelTextAnalyzer:
     def __init__(
         self,
         *,
-        max_chunk_chars: int = 1800,
-        overlap_chars: int = 240,
+        max_chunk_chars: int = DEFAULT_ANALYSIS_CHUNK_CHARS,
+        overlap_chars: int = DEFAULT_ANALYSIS_OVERLAP_CHARS,
         max_snippets: int = 600,
         max_event_cases: int = 120,
     ) -> None:

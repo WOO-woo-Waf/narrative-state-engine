@@ -145,6 +145,82 @@ def test_unified_text_llm_records_lifecycle_events(monkeypatch):
     ]
 
 
+def test_unified_text_llm_adds_json_mode_contract_and_retries_empty_json(monkeypatch):
+    import narrative_state_engine.llm.client as client_module
+
+    calls: list[dict] = []
+
+    class FakeClient:
+        def set_model(self, model: str) -> None:
+            self.model = model
+
+        def chat(self, messages, return_metadata=True, **kwargs):
+            calls.append({"messages": messages, "kwargs": kwargs})
+            value = "" if len(calls) == 1 else '{"ok": true}'
+            return LLMCallResult(value=value, usage={"total_tokens": 10}, stream=False)
+
+    monkeypatch.setattr(client_module, "record_llm_interaction", lambda **kwargs: None)
+    monkeypatch.setattr(client_module, "_sleep_backoff", lambda **kwargs: None)
+    monkeypatch.setattr(
+        client_module.LLMClientSingleton,
+        "get_instance",
+        staticmethod(lambda api_base, api_key: FakeClient()),
+    )
+
+    result = unified_text_llm(
+        [{"role": "user", "content": "hello"}],
+        config=NovelLLMConfig(api_base="http://example.com", api_key="key", model_name="demo-model", max_tokens=900),
+        purpose="json_test",
+        json_mode=True,
+        max_attempts=2,
+    )
+
+    assert result == '{"ok": true}'
+    assert len(calls) == 2
+    assert calls[0]["kwargs"]["json_mode"] is True
+    assert calls[0]["kwargs"]["max_tokens"] >= 4096
+    assert calls[0]["messages"][0]["role"] == "system"
+    assert "json mode contract" in calls[0]["messages"][0]["content"].lower()
+
+
+def test_openai_text_llm_maps_json_mode_to_response_format():
+    import narrative_state_engine.llm.client as client_module
+
+    captured: dict = {}
+
+    class FakeMessage:
+        content = '{"ok": true}'
+
+    class FakeChoice:
+        message = FakeMessage()
+
+    class FakeResponse:
+        choices = [FakeChoice()]
+        usage = {"total_tokens": 10}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return FakeResponse()
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    llm = object.__new__(client_module.OpenAITextLLM)
+    llm.client = type("FakeOpenAIClient", (), {"chat": FakeChat()})()
+    llm.model = "deepseek-chat"
+
+    result = llm.chat(
+        [{"role": "system", "content": "json"}],
+        json_mode=True,
+        max_tokens=128,
+    )
+
+    assert result == '{"ok": true}'
+    assert captured["response_format"] == {"type": "json_object"}
+    assert captured["max_tokens"] == 128
+
+
 def test_unified_text_llm_records_prompt_metadata(monkeypatch):
     import narrative_state_engine.llm.client as client_module
 

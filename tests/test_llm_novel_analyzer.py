@@ -61,6 +61,19 @@ def _fake_llm(messages, purpose):
                 "world_rules_confirmed": ["The anomaly is real."],
                 "open_questions": ["Who is behind the door?"],
                 "scene_markers": ["rainy night", "doorway"],
+                "scene_sequence": [
+                    {
+                        "scene_id": "scene-1",
+                        "location": "doorway",
+                        "characters": ["Hero"],
+                        "goal": "cross the threshold",
+                        "outcome": "the investigation moves inside",
+                    }
+                ],
+                "relationship_updates": [
+                    {"source": "Hero", "target": "anomaly", "public_status": "unknown"}
+                ],
+                "foreshadowing": [{"seed_text": "The sound repeats behind the door."}],
                 "style_profile_override": {"dialogue_ratio": 0.2},
                 "continuation_hooks": ["enter the doorway"],
                 "retrieval_keywords": ["rainy night", "investigation", "anomaly"],
@@ -92,6 +105,20 @@ def _fake_llm(messages, purpose):
             ],
             "world_rules": ["Anomalies must be confirmed through evidence."],
             "timeline": ["rainy-night anomaly discovered"],
+            "relationship_graph": [
+                {
+                    "source": "Hero",
+                    "target": "anomaly",
+                    "relationship_type": "investigation_target",
+                    "public_status": "unknown",
+                    "unresolved_conflicts": ["identity"],
+                }
+            ],
+            "locations": [{"name": "doorway", "location_type": "threshold"}],
+            "objects": [{"name": "door handle", "object_type": "clue"}],
+            "organizations": [{"name": "watchers", "organization_type": "hidden"}],
+            "foreshadowing_states": [{"seed_text": "The sound repeats behind the door."}],
+            "state_completeness": {"characters": 0.5, "relationships": 0.25},
             "style_bible": {"rhetoric_markers": ["tension"], "lexical_fingerprint": ["rain", "door"]},
             "continuation_constraints": ["Do not reveal the answer immediately."],
         },
@@ -114,6 +141,10 @@ def test_llm_novel_analyzer_builds_analysis_result_from_model_json():
     assert result.global_story_state is not None
     assert result.story_bible.character_cards[0].name == "Hero"
     assert result.story_bible.plot_threads[0].name == "anomaly investigation"
+    assert result.chapter_states[0].scene_sequence
+    assert result.global_story_state.relationship_graph
+    assert result.global_story_state.locations[0]["name"] == "doorway"
+    assert result.global_story_state.foreshadowing_states
     assert result.snippet_bank
 
 
@@ -144,6 +175,141 @@ def test_llm_novel_analyzer_can_analyze_chunks_concurrently():
     assert result.summary["analyzer"] == "llm"
     assert len(result.chunk_states) > 1
     assert max_active > 1
+
+
+def test_llm_novel_analyzer_keeps_partial_results_when_chunk_json_fails():
+    chunk_calls = 0
+
+    def fake_llm(messages, purpose):
+        nonlocal chunk_calls
+        if purpose == "novel_chunk_analysis":
+            chunk_calls += 1
+            if chunk_calls == 1:
+                return "{not-json"
+        return _fake_llm(messages, purpose)
+
+    analyzer = LLMNovelAnalyzer(
+        task_id="task-partial",
+        source_type="primary_story",
+        max_chunk_chars=90,
+        chunk_concurrency=2,
+        max_json_repair_attempts=0,
+        llm_call=fake_llm,
+    )
+    text = "Chapter One\n" + ("Rain hit the doorway. He stopped before the door and gripped the handle.\n" * 8)
+
+    result = analyzer.analyze(source_text=text, story_id="story-llm", story_title="LLM Test")
+
+    assert result.analysis_status == "completed_with_fallbacks"
+    assert result.summary["analyzer"] == "llm"
+    assert result.summary["source_role"] == "primary_story"
+    assert result.analysis_state["source_role"] == "primary_story"
+    assert result.summary["llm_fallback_reasons"]
+    assert any("novel_chunk_analysis" in item for item in result.summary["llm_fallback_reasons"])
+    assert result.story_bible.character_cards[0].name == "Hero"
+
+
+def test_llm_novel_analyzer_does_not_return_rule_analysis_when_global_json_fails():
+    def fake_llm(messages, purpose):
+        if purpose == "novel_global_analysis":
+            return "{bad-json"
+        return _fake_llm(messages, purpose)
+
+    analyzer = LLMNovelAnalyzer(
+        task_id="task-global-fallback",
+        source_type="primary_story",
+        max_chunk_chars=400,
+        max_json_repair_attempts=0,
+        llm_call=fake_llm,
+    )
+
+    result = analyzer.analyze(
+        source_text="Chapter One\nRain hit the doorway. He stopped before the door and gripped the handle.",
+        story_id="story-llm",
+        story_title="LLM Test",
+    )
+
+    assert result.summary["analyzer"] == "llm"
+    assert result.analysis_status == "completed_with_fallbacks"
+    assert result.analysis_status != "fallback_rule_analysis"
+    assert result.chapter_states
+    assert any("novel_global_analysis" in item for item in result.summary["llm_fallback_reasons"])
+
+
+def test_llm_novel_analyzer_repairs_invalid_json_and_writes_debug(tmp_path):
+    calls: list[str] = []
+
+    def fake_llm(messages, purpose):
+        calls.append(purpose)
+        if purpose == "novel_chunk_analysis":
+            return "{not-json"
+        if purpose == "novel_chunk_analysis_json_repair":
+            return _fake_llm(messages, "novel_chunk_analysis")
+        return _fake_llm(messages, purpose)
+
+    analyzer = LLMNovelAnalyzer(
+        task_id="task-repair",
+        source_type="primary_story",
+        max_chunk_chars=400,
+        max_json_repair_attempts=1,
+        json_debug_dir=tmp_path,
+        llm_call=fake_llm,
+    )
+
+    result = analyzer.analyze(
+        source_text="Chapter One\nRain hit the doorway. He stopped before the door.",
+        story_id="story-llm",
+        story_title="LLM Test",
+    )
+
+    assert result.analysis_status == "completed"
+    assert "novel_chunk_analysis_json_repair" in calls
+    assert any(path.name.endswith("_initial_parse_failed.json") for path in tmp_path.iterdir())
+    assert any(path.name.endswith("_repair_attempt_1.json") for path in tmp_path.iterdir())
+
+
+def test_llm_novel_analyzer_normalizes_generic_entity_ids():
+    def fake_llm(messages, purpose):
+        if purpose != "novel_global_analysis":
+            return _fake_llm(messages, purpose)
+        return json.dumps(
+            {
+                "story_id": "story-llm",
+                "title": "LLM Test",
+                "story_synopsis": "Hero and Rival remain in conflict.",
+                "character_cards": [
+                    {"character_id": "char-001", "name": "Hero", "current_goals": ["investigate"]},
+                    {"character_id": "char-002", "name": "Rival", "current_goals": ["hide the truth"]},
+                ],
+                "relationship_graph": [
+                    {
+                        "relationship_id": "relationship-001",
+                        "source": "char-001",
+                        "target": "char-002",
+                        "relationship_type": "rivalry",
+                    }
+                ],
+                "plot_threads": [{"thread_id": "arc-001", "name": "truth conflict"}],
+                "world_rules": [{"rule_id": "rule-001", "rule_text": "Truth has a cost."}],
+                "style_bible": {},
+            },
+            ensure_ascii=False,
+        )
+
+    analyzer = LLMNovelAnalyzer(source_type="primary_story", max_chunk_chars=400, llm_call=fake_llm)
+
+    result = analyzer.analyze(
+        source_text="Chapter One\nHero watched Rival by the door.",
+        story_id="story-llm",
+        story_title="LLM Test",
+    )
+
+    ids = {card.character_id for card in result.story_bible.character_cards}
+    assert ids == {"character:Hero", "character:Rival"}
+    relationship = result.global_story_state.relationship_graph[0]
+    assert relationship["source_character_id"] == "character:Hero"
+    assert relationship["target_character_id"] == "character:Rival"
+    assert relationship["relationship_id"] == "relationship:character:Hero:character:Rival:rivalry"
 
 
 def test_chunk_analysis_prompt_contains_schema_and_source_text():

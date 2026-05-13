@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 from narrative_state_engine.analysis import NovelTextAnalyzer
@@ -40,6 +41,39 @@ class ChapterContinuationResult:
     chapter_completed: bool
     rounds_executed: int
     final_chapter_text: str
+
+
+@dataclass
+class ChapterSegmentBlueprint:
+    segment_index: int
+    title: str
+    goal: str
+    required_beats: list[str]
+    continuity_focus: list[str]
+    target_min_chars: int
+    target_max_chars: int
+
+
+@dataclass
+class ChapterRoundSummary:
+    round_no: int
+    segment_index: int
+    summary: str
+    key_points: list[str]
+    tail: str
+    char_count: int
+
+
+@dataclass
+class ParallelSegmentResult:
+    segment_index: int
+    content: str
+    planned_beat: str
+    state_updates: list[dict]
+    continuity_notes: list[str]
+    evidence_ids: list[str]
+    quality_flags: list[str]
+    state: NovelAgentState
 
 
 @dataclass
@@ -94,6 +128,112 @@ class ChapterCompletionPolicy:
             weight_plot_progress=weights[2] / weight_sum,
             completion_threshold=completion_threshold,
         )
+
+
+class ChapterContinuityController:
+    def build_blueprint(
+        self,
+        state: NovelAgentState,
+        *,
+        total_chars: int,
+        max_rounds: int,
+    ) -> list[ChapterSegmentBlueprint]:
+        rounds = max(1, int(max_rounds))
+        total_chars = max(int(total_chars), 80)
+        beats = self._collect_beats(state)
+        if not beats:
+            beats = [state.chapter.objective or state.thread.user_input or "推进当前章节目标。"]
+        segment_count = min(rounds, max(1, len(beats), min(max((total_chars + 5999) // 6000, 1), rounds)))
+        chars_per_segment = max(total_chars // segment_count, 1)
+        blueprint: list[ChapterSegmentBlueprint] = []
+        for idx in range(1, segment_count + 1):
+            beat = beats[min(idx - 1, len(beats) - 1)]
+            extra_beats = beats[idx : idx + 2]
+            target_min = max(900, int(chars_per_segment * 0.82))
+            target_max = max(target_min + 400, int(chars_per_segment * 1.18))
+            if idx == segment_count:
+                target_max = max(target_max, total_chars)
+            blueprint.append(
+                ChapterSegmentBlueprint(
+                    segment_index=idx,
+                    title=f"第{idx}段",
+                    goal=beat,
+                    required_beats=[beat, *extra_beats],
+                    continuity_focus=self._continuity_focus(state, idx=idx),
+                    target_min_chars=target_min,
+                    target_max_chars=target_max,
+                )
+            )
+        return blueprint
+
+    def summarize_round(
+        self,
+        *,
+        round_no: int,
+        segment_index: int,
+        draft_text: str,
+        accepted_summaries: list[str],
+    ) -> ChapterRoundSummary:
+        clean = re.sub(r"\s+", " ", str(draft_text or "")).strip()
+        key_points = [item for item in accepted_summaries if item][:6]
+        if not key_points and clean:
+            key_points = self._sentence_points(clean)
+        summary = "；".join(key_points)[:1000] if key_points else clean[:600]
+        return ChapterRoundSummary(
+            round_no=round_no,
+            segment_index=segment_index,
+            summary=summary,
+            key_points=key_points[:8],
+            tail=clean[-1200:],
+            char_count=len(str(draft_text or "").strip()),
+        )
+
+    def _collect_beats(self, state: NovelAgentState) -> list[str]:
+        beats: list[str] = []
+        for blueprint in state.domain.chapter_blueprints:
+            if blueprint.chapter_index in {0, state.chapter.chapter_number}:
+                beats.extend(str(item) for item in blueprint.required_beats)
+                if blueprint.chapter_goal:
+                    beats.append(str(blueprint.chapter_goal))
+        beats.extend(str(item) for item in state.domain.author_plan.required_beats)
+        beats.extend(str(item) for item in state.domain.author_plan.major_plot_spine)
+        beats.extend(str(item) for item in state.chapter.open_questions[:4])
+        if state.chapter.objective:
+            objective_parts = [
+                item.strip()
+                for item in re.split(r"[；;。]\s*", state.chapter.objective)
+                if item.strip()
+            ]
+            beats.extend(objective_parts)
+        return self._unique(beats)[:24]
+
+    def _continuity_focus(self, state: NovelAgentState, *, idx: int) -> list[str]:
+        focus = []
+        if idx == 1 and state.chapter.latest_summary:
+            focus.append(f"承接上章: {state.chapter.latest_summary[:160]}")
+        focus.extend(str(item) for item in state.domain.author_plan.forbidden_beats[:3])
+        focus.extend(str(item.text) for item in state.domain.author_constraints if item.status == "confirmed")
+        focus.extend(str(item) for item in state.story.world_rules[:3])
+        return self._unique(focus)[:8]
+
+    def _sentence_points(self, text: str) -> list[str]:
+        sentences = [item.strip() for item in re.split(r"(?<=[。！？!?])", text) if item.strip()]
+        if not sentences:
+            return [text[:240]] if text else []
+        if len(sentences) <= 3:
+            return sentences[:3]
+        return [sentences[0], sentences[len(sentences) // 2], sentences[-1]]
+
+    def _unique(self, items: list[str]) -> list[str]:
+        seen = set()
+        output = []
+        for item in items:
+            value = str(item or "").strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            output.append(value)
+        return output
 
 
 class ProposalApplier:
@@ -520,6 +660,16 @@ class NovelContinuationService:
 
         working_state = state.model_copy(deep=True)
         chapter_fragments: list[str] = []
+        continuity_controller = ChapterContinuityController()
+        segment_blueprint = continuity_controller.build_blueprint(
+            working_state,
+            total_chars=policy.min_chars,
+            max_rounds=rounds,
+        )
+        round_summaries: list[ChapterRoundSummary] = []
+        working_state.metadata["chapter_segment_blueprint"] = [
+            item.__dict__ for item in segment_blueprint
+        ]
         last_committed_state: NovelAgentState | None = None
         persisted = False
         chapter_completed = False
@@ -532,12 +682,19 @@ class NovelContinuationService:
             working_state.metadata["chapter_fragments_so_far"] = list(chapter_fragments)
             written_chars = len("\n\n".join(item.strip() for item in chapter_fragments if item.strip()).strip())
             remaining_rounds = max(rounds - round_no + 1, 1)
+            current_segment = segment_blueprint[min(round_no - 1, len(segment_blueprint) - 1)]
             segment_plan = self._build_segment_plan(
                 written_chars=written_chars,
                 target_chars=policy.min_chars,
                 remaining_rounds=remaining_rounds,
+                blueprint=current_segment,
             )
             working_state.metadata["chapter_segment_plan"] = segment_plan
+            working_state.metadata["chapter_current_segment"] = current_segment.__dict__
+            working_state.metadata["chapter_round_summaries"] = [
+                item.__dict__ for item in round_summaries
+            ]
+            working_state.metadata["chapter_progress_summary"] = self._chapter_progress_summary(round_summaries)
             working_state.metadata["chapter_fragment_stats"] = {
                 "written_chars": written_chars,
                 "target_chars": policy.min_chars,
@@ -561,6 +718,16 @@ class NovelContinuationService:
                 draft_text = (working_state.draft.content or "").strip()
                 if draft_text:
                     chapter_fragments.append(draft_text)
+                    round_summaries.append(
+                        continuity_controller.summarize_round(
+                            round_no=round_no,
+                            segment_index=int(current_segment.segment_index),
+                            draft_text=draft_text,
+                            accepted_summaries=[
+                                change.summary for change in working_state.commit.accepted_changes if change.summary
+                            ],
+                        )
+                    )
                 last_committed_state = working_state.model_copy(deep=True)
 
             completion_eval = self._evaluate_chapter_completion(
@@ -582,6 +749,9 @@ class NovelContinuationService:
         final_state.metadata["chapter_loop_rounds_executed"] = rounds_executed
         final_state.metadata["chapter_completed"] = chapter_completed
         final_state.metadata["chapter_fragments"] = list(chapter_fragments)
+        final_state.metadata["chapter_segment_blueprint"] = [item.__dict__ for item in segment_blueprint]
+        final_state.metadata["chapter_round_summaries"] = [item.__dict__ for item in round_summaries]
+        final_state.metadata["chapter_progress_summary"] = self._chapter_progress_summary(round_summaries)
         final_state.metadata["final_chapter_chars"] = len(final_text.strip())
         final_state.metadata["final_chapter_paragraphs"] = self._count_paragraphs(final_text)
         final_state.metadata["chapter_completion_policy"] = {
@@ -612,6 +782,171 @@ class NovelContinuationService:
             persisted=persisted,
             chapter_completed=chapter_completed,
             rounds_executed=rounds_executed,
+            final_chapter_text=final_text,
+        )
+
+    def continue_chapter_parallel_from_state(
+        self,
+        state: NovelAgentState,
+        *,
+        max_rounds: int = 3,
+        min_chars: int = 1200,
+        min_paragraphs: int = 4,
+        completion_policy: ChapterCompletionPolicy | None = None,
+        agent_concurrency: int = 2,
+        persist: bool = True,
+        use_langgraph: bool = False,
+        llm_model_name: str | None = None,
+    ) -> ChapterContinuationResult:
+        rounds = max(1, int(max_rounds))
+        policy = (completion_policy or ChapterCompletionPolicy(
+            min_chars=min_chars,
+            min_paragraphs=min_paragraphs,
+        )).normalized()
+        inferred_min_chars = self._infer_requested_char_target(state.thread.user_input)
+        if inferred_min_chars > policy.min_chars:
+            policy = ChapterCompletionPolicy(
+                min_chars=inferred_min_chars,
+                min_paragraphs=policy.min_paragraphs,
+                min_structure_anchors=policy.min_structure_anchors,
+                plot_progress_min_score=policy.plot_progress_min_score,
+                weight_chars=policy.weight_chars,
+                weight_structure=policy.weight_structure,
+                weight_plot_progress=policy.weight_plot_progress,
+                completion_threshold=policy.completion_threshold,
+            ).normalized()
+
+        base_state = state.model_copy(deep=True)
+        controller = ChapterContinuityController()
+        segment_blueprint = controller.build_blueprint(
+            base_state,
+            total_chars=policy.min_chars,
+            max_rounds=rounds,
+        )
+        base_state.metadata["chapter_segment_blueprint"] = [item.__dict__ for item in segment_blueprint]
+        base_state.metadata["parallel_chapter_generation"] = True
+
+        def run_segment(blueprint: ChapterSegmentBlueprint) -> ParallelSegmentResult:
+            segment_state = base_state.model_copy(deep=True)
+            segment_state.thread.request_id = new_request_id()
+            segment_state.metadata["chapter_loop_round"] = int(blueprint.segment_index)
+            segment_state.metadata["chapter_current_segment"] = blueprint.__dict__
+            segment_state.metadata["chapter_segment_plan"] = self._build_segment_plan(
+                written_chars=0,
+                target_chars=policy.min_chars,
+                remaining_rounds=1,
+                blueprint=blueprint,
+            )
+            segment_state.metadata["chapter_fragment_stats"] = {
+                "written_chars": 0,
+                "target_chars": policy.min_chars,
+                "remaining_chars": policy.min_chars,
+                "remaining_rounds": 1,
+                "fragment_count": 0,
+            }
+            segment_state.metadata["chapter_progress_summary"] = ""
+            segment_state.metadata["chapter_fragment_tail"] = ""
+            segment_state.metadata["parallel_segment_index"] = int(blueprint.segment_index)
+            self._reset_round_transient_fields(segment_state)
+            round_result = self.continue_from_state(
+                segment_state,
+                persist=False,
+                use_langgraph=use_langgraph,
+                llm_model_name=llm_model_name,
+            )
+            result_state = round_result.state
+            updates = [item.model_dump(mode="json") for item in result_state.thread.pending_changes]
+            return ParallelSegmentResult(
+                segment_index=int(blueprint.segment_index),
+                content=(result_state.draft.content or "").strip(),
+                planned_beat=result_state.draft.planned_beat or blueprint.goal,
+                state_updates=updates,
+                continuity_notes=list(result_state.draft.continuity_notes),
+                evidence_ids=list(result_state.analysis.retrieved_snippet_ids) + list(result_state.analysis.retrieved_case_ids),
+                quality_flags=self._parallel_quality_flags(result_state),
+                state=result_state,
+            )
+
+        worker_count = min(max(int(agent_concurrency), 1), len(segment_blueprint))
+        segment_results: list[ParallelSegmentResult] = []
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [executor.submit(run_segment, blueprint) for blueprint in segment_blueprint]
+            for future in as_completed(futures):
+                segment_results.append(future.result())
+
+        segment_results.sort(key=lambda item: item.segment_index)
+        fragments = [item.content for item in segment_results if item.content]
+        final_state = self._integrate_parallel_segments(
+            base_state=base_state,
+            segment_results=segment_results,
+            policy=policy,
+        )
+        final_text = render_chapter_text(final_state, round_fragments=fragments)
+        final_state.chapter.content = final_text
+        final_state.draft.content = final_text
+        self._refresh_generated_chapter_analysis(final_state)
+        completion_eval = self._evaluate_chapter_completion(
+            state=final_state,
+            fragments=fragments,
+            policy=policy,
+        )
+        final_state.metadata["chapter_completed"] = bool(completion_eval.get("completed", False))
+        final_state.metadata["chapter_loop_rounds_executed"] = len(segment_results)
+        final_state.metadata["chapter_fragments"] = fragments
+        final_state.metadata["chapter_segment_blueprint"] = [item.__dict__ for item in segment_blueprint]
+        final_state.metadata["parallel_segment_results"] = [
+            {
+                "segment_index": item.segment_index,
+                "planned_beat": item.planned_beat,
+                "char_count": len(item.content),
+                "state_updates": item.state_updates,
+                "continuity_notes": item.continuity_notes,
+                "evidence_ids": item.evidence_ids,
+                "quality_flags": item.quality_flags,
+            }
+            for item in segment_results
+        ]
+        final_state.metadata["parallel_integration_report"] = {
+            "segment_count": len(segment_results),
+            "integration_method": "ordered_segment_merge_with_state_union",
+            "unmet_constraints": self._parallel_unmet_constraints(final_state, fragments),
+            "human_review_questions": self._parallel_human_review_questions(final_state, segment_results),
+        }
+        final_state.metadata["chapter_completion_eval"] = completion_eval
+        final_state.metadata["chapter_completion_rounds"] = [{**completion_eval, "round": "parallel"}]
+        final_state.metadata["final_chapter_chars"] = len(final_text.strip())
+        final_state.metadata["final_chapter_paragraphs"] = self._count_paragraphs(final_text)
+        final_state.metadata["chapter_completion_policy"] = {
+            "min_chars": policy.min_chars,
+            "min_paragraphs": policy.min_paragraphs,
+            "min_structure_anchors": policy.min_structure_anchors,
+            "plot_progress_min_score": policy.plot_progress_min_score,
+            "weight_chars": policy.weight_chars,
+            "weight_structure": policy.weight_structure,
+            "weight_plot_progress": policy.weight_plot_progress,
+            "completion_threshold": policy.completion_threshold,
+        }
+
+        persisted = False
+        if persist and final_state.commit.status == CommitStatus.COMMITTED:
+            final_state = self.proposal_applier.apply(final_state)
+            final_state.chapter.content = final_text
+            final_state.draft.content = final_text
+            self.repository.save(final_state)
+            latest_chapter_state = self._latest_analysis_chapter_state(final_state)
+            if latest_chapter_state:
+                self.repository.append_generated_chapter_analysis(
+                    final_state.story.story_id,
+                    latest_chapter_state,
+                    state_version_no=int(final_state.metadata.get("state_version_no", 0) or 0),
+                )
+            persisted = True
+
+        return ChapterContinuationResult(
+            state=final_state,
+            persisted=persisted,
+            chapter_completed=bool(completion_eval.get("completed", False)),
+            rounds_executed=len(segment_results),
             final_chapter_text=final_text,
         )
 
@@ -720,6 +1055,70 @@ class NovelContinuationService:
     def get_story_replay_lineage(self, story_id: str, *, limit: int = 20) -> list[dict]:
         return self.repository.load_story_version_lineage(story_id, limit=limit)
 
+    def _integrate_parallel_segments(
+        self,
+        *,
+        base_state: NovelAgentState,
+        segment_results: list[ParallelSegmentResult],
+        policy: ChapterCompletionPolicy,
+    ) -> NovelAgentState:
+        final_state = base_state.model_copy(deep=True)
+        accepted_changes = []
+        pending_changes = []
+        for result in segment_results:
+            if result.state.commit.status == CommitStatus.COMMITTED:
+                accepted_changes.extend(result.state.commit.accepted_changes)
+            pending_changes.extend(result.state.thread.pending_changes)
+        final_state.thread.pending_changes = pending_changes
+        final_state.commit.accepted_changes = accepted_changes or pending_changes
+        final_state.commit.status = CommitStatus.COMMITTED if segment_results else CommitStatus.ROLLED_BACK
+        final_state.commit.reason = (
+            "并行片段已按 segment_index 整合，状态更新取各 worker 的 proposal 并集。"
+            if segment_results
+            else "没有可整合的并行片段。"
+        )
+        final_state.validation.status = ValidationStatus.PASSED if segment_results else ValidationStatus.FAILED
+        final_state.validation.requires_human_review = bool(
+            any(item.quality_flags for item in segment_results)
+        )
+        if final_state.validation.requires_human_review:
+            final_state.metadata["human_review_note"] = "并行片段存在质量标记，建议人工审核后 accept-branch。"
+        final_state.metadata["parallel_target_chars"] = policy.min_chars
+        return final_state
+
+    def _parallel_quality_flags(self, state: NovelAgentState) -> list[str]:
+        flags = []
+        if state.commit.status != CommitStatus.COMMITTED:
+            flags.append(f"commit_{state.commit.status.value}")
+        if state.validation.status != ValidationStatus.PASSED:
+            flags.append(f"validation_{state.validation.status.value}")
+        if len((state.draft.content or "").strip()) < 80:
+            flags.append("segment_too_short")
+        return flags
+
+    def _parallel_unmet_constraints(self, state: NovelAgentState, fragments: list[str]) -> list[str]:
+        text = "\n".join(fragments)
+        missing = []
+        for constraint in state.domain.author_constraints:
+            if constraint.status != "confirmed" or constraint.constraint_type != "required_beat":
+                continue
+            if constraint.text and constraint.text not in text:
+                missing.append(constraint.text)
+        return missing[:12]
+
+    def _parallel_human_review_questions(
+        self,
+        state: NovelAgentState,
+        segment_results: list[ParallelSegmentResult],
+    ) -> list[str]:
+        questions = []
+        if any(item.quality_flags for item in segment_results):
+            questions.append("是否接受带有质量标记的并行片段，还是基于该分支重写？")
+        missing = self._parallel_unmet_constraints(state, [item.content for item in segment_results])
+        if missing:
+            questions.append("以下作者要求未显式命中，是否补写或放到下一章：" + "；".join(missing[:5]))
+        return questions
+
     def _reset_round_transient_fields(self, state: NovelAgentState) -> None:
         state.thread.pending_changes = []
         state.draft.extracted_updates = []
@@ -818,14 +1217,20 @@ class NovelContinuationService:
         written_chars: int,
         target_chars: int,
         remaining_rounds: int,
+        blueprint: ChapterSegmentBlueprint | None = None,
     ) -> dict[str, int]:
         remaining_chars = max(int(target_chars) - int(written_chars), 0)
         remaining_rounds = max(int(remaining_rounds), 1)
         average_target = max(int((remaining_chars + remaining_rounds - 1) / remaining_rounds), 0)
-        target_min = min(max(average_target, 900), 1600)
-        target_max = min(max(target_min + 250, 1200), 2000)
-        hard_cap = min(max(target_max + 200, 1400), 2200)
-        return {
+        if blueprint is not None:
+            target_min = max(900, int(blueprint.target_min_chars))
+            target_max = max(target_min + 400, int(blueprint.target_max_chars))
+            hard_cap = max(target_max + 600, target_max)
+        else:
+            target_min = min(max(average_target, 900), 1600)
+            target_max = min(max(target_min + 250, 1200), 2000)
+            hard_cap = min(max(target_max + 200, 1400), 2200)
+        plan = {
             "written_chars": int(written_chars),
             "target_chars": int(target_chars),
             "remaining_chars": remaining_chars,
@@ -834,6 +1239,25 @@ class NovelContinuationService:
             "target_max_chars": target_max,
             "hard_cap_chars": hard_cap,
         }
+        if blueprint is not None:
+            plan.update(
+                {
+                    "segment_index": int(blueprint.segment_index),
+                    "segment_target_min_chars": int(blueprint.target_min_chars),
+                    "segment_target_max_chars": int(blueprint.target_max_chars),
+                }
+            )
+        return plan
+
+    def _chapter_progress_summary(self, summaries: list[ChapterRoundSummary]) -> str:
+        if not summaries:
+            return ""
+        rows = [
+            f"第{item.round_no}轮/第{item.segment_index}段: {item.summary}"
+            for item in summaries[-8:]
+            if item.summary
+        ]
+        return "\n".join(rows)[-2400:]
 
     def _tail_fragment_context(self, fragments: list[str], *, max_chars: int = 900) -> str:
         merged = "\n\n".join(str(item).strip() for item in fragments if str(item).strip()).strip()

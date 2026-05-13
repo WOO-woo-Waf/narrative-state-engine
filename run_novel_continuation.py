@@ -273,7 +273,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--analyze-first", action="store_true", help="Legacy alias for analyze-continue mode.")
     parser.add_argument("--analysis-file", default="", help="Output analysis json filename.")
     parser.add_argument("--analysis-state-file", default="", help="Existing analysis json filename to load for continue mode.")
-    parser.add_argument("--analysis-max-chunk-chars", type=int, default=1800, help="Max chars per analysis chunk.")
+    parser.add_argument("--analysis-max-chunk-chars", type=int, default=int(os.getenv("NOVEL_AGENT_ANALYSIS_MAX_CHUNK_CHARS", "60000")), help="Soft max chars per analysis chunk.")
     parser.add_argument("--chapter-number", type=int, default=0, help="Current chapter number for continuation.")
     parser.add_argument("--target-chapter-number", type=int, default=0, help="Explicit target chapter number for continuation.")
     parser.add_argument("--chapter-rounds", type=int, default=1, help="Internal continuation rounds for one chapter.")

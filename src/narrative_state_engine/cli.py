@@ -26,9 +26,16 @@ from narrative_state_engine.analysis import (
 )
 from narrative_state_engine.bootstrap import apply_analysis_to_state
 from narrative_state_engine.config import load_project_env
+from narrative_state_engine.analysis.chunker import DEFAULT_ANALYSIS_CHUNK_CHARS, DEFAULT_ANALYSIS_OVERLAP_CHARS
+from narrative_state_engine.analysis.identity import normalize_analysis_result_identities
 from narrative_state_engine.domain.llm_planning import LLMAuthorPlanningEngine
+from narrative_state_engine.domain.environment import SceneType
+from narrative_state_engine.domain.environment_builder import StateEnvironmentBuilder
 from narrative_state_engine.domain.planning import AuthorPlanningEngine
+from narrative_state_engine.domain.state_creation import StateCreationEngine
+from narrative_state_engine.domain.state_objects import StateReviewRunRecord
 from narrative_state_engine.domain.state_editing import StateEditEngine
+from narrative_state_engine.domain.state_review import StateCompletenessEvaluator
 from narrative_state_engine.embedding.batcher import EmbeddingBackfillService
 from narrative_state_engine.embedding.client import HTTPEmbeddingProvider, HTTPReranker
 from narrative_state_engine.embedding.remote_service import RemoteEmbeddingServiceConfig, RemoteEmbeddingServiceManager
@@ -41,7 +48,10 @@ from narrative_state_engine.models import NovelAgentState
 from narrative_state_engine.retrieval.hybrid_search import HybridSearchService
 from narrative_state_engine.state_identity import scope_bootstrap_state_to_story
 from narrative_state_engine.storage.repository import build_story_state_repository
+from narrative_state_engine.storage.dialogue import DialogueRepository
 from narrative_state_engine.storage.branches import ContinuationBranchStore, branch_state
+from narrative_state_engine.dialogue.service import DialogueService
+from narrative_state_engine.graph_view import build_branch_graph, build_state_graph, build_transition_graph
 from narrative_state_engine.task_scope import normalize_task_id, scoped_storage_id
 
 app = typer.Typer(no_args_is_help=True)
@@ -54,6 +64,19 @@ def _env_int(name: str, default: int) -> int:
         return int(os.getenv(name, str(default)) or default)
     except (TypeError, ValueError):
         return default
+
+
+def _source_role_from_source_type(source_type: str) -> str:
+    clean = str(source_type or "").strip().lower()
+    if clean in {"primary_story", "target_continuation", "main_story", "canonical_source"}:
+        return "primary_story"
+    if clean in {"same_world_reference", "same_author_world_style", "style_reference", "world_reference"}:
+        return "same_world_reference"
+    if clean in {"crossover_reference", "crossover_extra", "crossover_linkage"}:
+        return "crossover_reference"
+    if "style" in clean or "reference" in clean:
+        return "reference"
+    return "primary_story" if not clean else clean
 
 
 @app.command()
@@ -155,6 +178,10 @@ def generate_chapter(
     objective: str = typer.Option("", "--objective", help="Chapter objective override."),
     output: Path = typer.Option(..., "--output", help="Pure chapter txt output path."),
     rounds: int = typer.Option(3, "--rounds", min=1, help="Maximum internal generation rounds."),
+    chapter_mode: str = typer.Option("sequential", "--chapter-mode", help="sequential or parallel chapter generation."),
+    context_budget: int = typer.Option(0, "--context-budget", min=0, help="Override generation context token budget."),
+    agent_concurrency: int = typer.Option(2, "--agent-concurrency", min=1, max=8, help="Parallel segment writer concurrency."),
+    review_output: Path | None = typer.Option(None, "--review-output", help="Optional state review JSON output path."),
     min_chars: int = typer.Option(1200, "--min-chars", min=80, help="Minimum final chapter chars."),
     min_paragraphs: int = typer.Option(4, "--min-paragraphs", min=1, help="Minimum final chapter paragraphs."),
     template: bool = typer.Option(False, "--template", help="Use template generator instead of configured LLM."),
@@ -195,11 +222,25 @@ def generate_chapter(
     if objective:
         state.chapter.objective = objective
     state.metadata["task_id"] = task_id
+    if context_budget:
+        state.metadata["generation_context_budget"] = int(context_budget)
+        state.metadata["retrieval_token_budget"] = int(context_budget)
     state.metadata["continuity_anchor_pack"] = _build_continuity_anchor_pack(
         database_url=db_url,
         state=state,
         parent_branch_id=parent_branch_id,
     )
+    generation_environment = StateEnvironmentBuilder(repository, branch_store=branch_store).build_environment(
+        story_id,
+        task_id,
+        scene_type=SceneType.CONTINUATION.value,
+        branch_id=parent_branch_id,
+        context_budget={"max_objects": 120, "max_candidates": 120, "max_branches": 20, "tokens": int(context_budget or 0)},
+    )
+    state.metadata["base_state_version_no"] = generation_environment.base_state_version_no
+    state.metadata["author_plan_state_version_no"] = generation_environment.base_state_version_no
+    state.metadata["state_environment_snapshot"] = generation_environment.model_dump(mode="json")
+    state.metadata["task_type"] = "continuation"
     set_actor("cli")
     set_thread_id(state.thread.thread_id)
     set_story_id(state.story.story_id)
@@ -222,14 +263,27 @@ def generate_chapter(
             generator=TemplateDraftGenerator() if template else None,
             extractor=RuleBasedInformationExtractor() if template else None,
         )
-        result = service.continue_chapter_from_state(
-            state,
-            max_rounds=rounds,
-            min_chars=min_chars,
-            min_paragraphs=min_paragraphs,
-            persist=pipeline_persist,
-            llm_model_name=model or None,
-        )
+        if chapter_mode.strip().lower() == "parallel":
+            result = service.continue_chapter_parallel_from_state(
+                state,
+                max_rounds=rounds,
+                min_chars=min_chars,
+                min_paragraphs=min_paragraphs,
+                agent_concurrency=agent_concurrency,
+                persist=pipeline_persist,
+                llm_model_name=model or None,
+            )
+        elif chapter_mode.strip().lower() == "sequential":
+            result = service.continue_chapter_from_state(
+                state,
+                max_rounds=rounds,
+                min_chars=min_chars,
+                min_paragraphs=min_paragraphs,
+                persist=pipeline_persist,
+                llm_model_name=model or None,
+            )
+        else:
+            raise typer.BadParameter("--chapter-mode must be sequential or parallel")
     finally:
         _restore_env("NOVEL_AGENT_ENABLE_PIPELINE_RAG", previous_rag)
         if not pipeline_persist:
@@ -238,15 +292,21 @@ def generate_chapter(
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(result.final_chapter_text, encoding="utf-8")
+    if review_output is not None:
+        review = StateCompletenessEvaluator().evaluate(result.state)
+        _write_json_file(review_output, review)
     branch_id = ""
     if persist and branch_mode == "draft":
         branch_id = scoped_storage_id("branch", task_id, story_id, uuid.uuid4().hex[:12])
         branch_state_snapshot = result.state.model_copy(deep=True)
         branch_state_snapshot.chapter.content = result.final_chapter_text
         branch_state_snapshot.metadata["draft_branch_id"] = branch_id
+        branch_state_snapshot.metadata["output_branch_id"] = branch_id
         branch_state_snapshot.metadata["branch_mode"] = "draft"
         branch_state_snapshot.metadata["output_path"] = str(output)
         branch_state_snapshot.metadata["parent_branch_id"] = parent_branch_id
+        branch_state_snapshot.metadata["state_environment_snapshot"] = generation_environment.model_dump(mode="json")
+        branch_state_snapshot.metadata["author_plan_state_version_no"] = generation_environment.base_state_version_no
         branch_state_snapshot.metadata["base_state_version_no"] = int(
             state.metadata.get("state_version_no", base_version or 0) or 0
         ) or None
@@ -287,6 +347,7 @@ def generate_chapter(
         "story_id": story_id,
         "task_id": task_id,
         "branch_mode": branch_mode,
+        "chapter_mode": chapter_mode,
         "branch_id": branch_id,
         "parent_branch_id": parent_branch_id,
         "output": str(output),
@@ -295,8 +356,11 @@ def generate_chapter(
         "rounds_executed": result.rounds_executed,
         "chars": len(result.final_chapter_text.strip()),
         "commit_status": str(result.state.commit.status.value if hasattr(result.state.commit.status, "value") else result.state.commit.status),
+        "state_review_output": str(review_output) if review_output else "",
     }
     console.print(Panel(_console_safe(json.dumps(payload, ensure_ascii=False, indent=2)), title="Generate Chapter"))
+    if not result.chapter_completed:
+        raise typer.Exit(code=2)
 
 
 @app.command("author-plan-debug")
@@ -365,6 +429,131 @@ def create_state(
         "domain_counts": _domain_counts(state),
     }
     console.print(Panel(_console_safe(json.dumps(payload, ensure_ascii=False, indent=2)), title="Create State"))
+
+
+@app.command("create-state-from-dialogue")
+def create_state_from_dialogue(
+    seed: str = typer.Option(..., "--seed", help="Author seed for initial state candidates."),
+    story_id: str = typer.Option(..., "--story-id", help="Story id."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
+    persist: bool = typer.Option(True, "--persist/--no-persist", help="Persist candidate set/items."),
+    commit: bool = typer.Option(False, "--commit", help="Accept generated candidates immediately."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    task_id = normalize_task_id(task_id, story_id)
+    repository = build_story_state_repository(_database_url(database_url), auto_init_schema=True)
+    environment = StateEnvironmentBuilder(repository).build_environment(
+        story_id,
+        task_id,
+        scene_type=SceneType.STATE_CREATION.value,
+    )
+    engine = StateCreationEngine()
+    proposal = engine.propose(environment, seed)
+    persisted = {}
+    committed = {}
+    if persist:
+        persisted = engine.persist(repository, proposal)
+    if commit:
+        if not persist:
+            engine.persist(repository, proposal)
+        committed = engine.commit(
+            repository,
+            story_id=story_id,
+            task_id=task_id,
+            candidate_set_id=proposal.candidate_set.candidate_set_id,
+        )
+    payload = {
+        "story_id": story_id,
+        "task_id": task_id,
+        "candidate_set": proposal.candidate_set.model_dump(mode="json"),
+        "candidate_items": [item.model_dump(mode="json") for item in proposal.candidate_items],
+        "persisted": persisted,
+        "committed": committed,
+    }
+    console.print(Panel(_console_safe(json.dumps(payload, ensure_ascii=False, indent=2)), title="Create State From Dialogue"))
+
+
+@app.command("state-environment")
+def state_environment(
+    story_id: str = typer.Option(..., "--story-id", help="Story id."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
+    scene_type: str = typer.Option(SceneType.STATE_MAINTENANCE.value, "--scene-type", help="Scene type."),
+    render: bool = typer.Option(False, "--render", help="Render model-facing Markdown."),
+    output: Path | None = typer.Option(None, "--output", help="Optional JSON/Markdown output path."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    task_id = normalize_task_id(task_id, story_id)
+    repository = build_story_state_repository(_database_url(database_url), auto_init_schema=True)
+    builder = StateEnvironmentBuilder(repository)
+    environment = builder.build_environment(story_id, task_id, scene_type=scene_type)
+    payload: Any = builder.render_environment_for_model(environment) if render else environment.model_dump(mode="json")
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    console.print(Panel(_console_safe(payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, indent=2)), title="State Environment"))
+
+
+@app.command("dialogue-session")
+def dialogue_session(
+    story_id: str = typer.Option(..., "--story-id", help="Story id."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
+    scene_type: str = typer.Option(SceneType.STATE_MAINTENANCE.value, "--scene-type", help="Scene type."),
+    title: str = typer.Option("", "--title", help="Session title."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    task_id = normalize_task_id(task_id, story_id)
+    db_url = _database_url(database_url)
+    build_story_state_repository(db_url, auto_init_schema=True)
+    service = DialogueService(
+        dialogue_repository=DialogueRepository(database_url=db_url),
+        state_repository=build_story_state_repository(db_url, auto_init_schema=False),
+    )
+    record = service.create_session(story_id=story_id, task_id=task_id, scene_type=scene_type, title=title)
+    console.print(Panel(_console_safe(json.dumps(record.model_dump(mode="json"), ensure_ascii=False, indent=2)), title="Dialogue Session"))
+
+
+@app.command("dialogue-action")
+def dialogue_action(
+    session_id: str = typer.Option(..., "--session-id", help="Dialogue session id."),
+    action_type: str = typer.Option(..., "--action-type", help="Action type."),
+    confirm: bool = typer.Option(False, "--confirm", help="Confirm and execute the action."),
+    params_json: str = typer.Option("{}", "--params-json", help="Action params JSON."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    db_url = _database_url(database_url)
+    repository = build_story_state_repository(db_url, auto_init_schema=True)
+    service = DialogueService(
+        dialogue_repository=DialogueRepository(database_url=db_url),
+        state_repository=repository,
+        branch_store=ContinuationBranchStore(database_url=db_url),
+    )
+    action = service.create_action(session_id, action_type=action_type, params=_jsonish(params_json) or {})
+    if confirm:
+        action = service.confirm_action(action.action_id)
+    console.print(Panel(_console_safe(json.dumps(action.model_dump(mode="json"), ensure_ascii=False, indent=2)), title="Dialogue Action"))
+
+
+@app.command("graph-view")
+def graph_view(
+    story_id: str = typer.Option(..., "--story-id", help="Story id."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
+    graph_type: str = typer.Option("state", "--graph-type", help="state, branches, or transitions."),
+    output: Path | None = typer.Option(None, "--output", help="Optional JSON output path."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    task_id = normalize_task_id(task_id, story_id)
+    db_url = _database_url(database_url)
+    repository = build_story_state_repository(db_url, auto_init_schema=False)
+    if graph_type == "state":
+        graph = build_state_graph(repository.load_state_objects(story_id, task_id=task_id, limit=800))
+    elif graph_type == "branches":
+        graph = build_branch_graph(_load_branch_rows_for_cli(db_url, story_id=story_id, task_id=task_id))
+    elif graph_type == "transitions":
+        graph = build_transition_graph(_load_transition_rows_for_cli(db_url, story_id=story_id, task_id=task_id))
+    else:
+        raise typer.BadParameter("--graph-type must be state, branches, or transitions")
+    payload = graph.model_dump(mode="json")
+    _emit_json_panel(payload, title="Graph View", output=output)
 
 
 def _repository_call_with_task(method: Any, story_id: str, *, task_id: str, **kwargs: Any) -> Any:
@@ -446,6 +635,7 @@ def edit_state(
     story_id: str = typer.Option(..., "--story-id", help="Story id to edit."),
     task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
     confirm: bool = typer.Option(False, "--confirm", help="Apply the edit and persist it."),
+    sync_analysis: bool = typer.Option(False, "--sync-analysis/--no-sync-analysis", help="Optionally merge latest analysis into the working state before editing."),
     persist: bool = typer.Option(True, "--persist/--no-persist", help="Persist confirmed edit."),
     database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
 ) -> None:
@@ -454,32 +644,265 @@ def edit_state(
     state = repository.get(story_id, task_id=task_id)
     if state is None:
         raise typer.BadParameter(f"story state not found: {story_id}")
-    synced_analysis = _sync_latest_analysis_into_state(
-        repository=repository,
-        state=state,
-        story_id=story_id,
-        task_id=task_id,
-    )
+    synced_analysis = False
+    if sync_analysis:
+        synced_analysis = _sync_latest_analysis_into_state(
+            repository=repository,
+            state=state,
+            story_id=story_id,
+            task_id=task_id,
+        )
     engine = StateEditEngine()
     proposal = engine.propose(state, author_input)
     confirmed = None
     if confirm:
         confirmed = engine.confirm(state, proposal)
-        if persist:
-            repository.save(state)
+    if persist:
+        repository.save(state)
     result = confirmed or proposal
     payload = {
         "story_id": story_id,
         "task_id": task_id,
         "status": result.status,
         "proposal_id": result.proposal_id,
-        "persisted": bool(confirm and persist),
+        "persisted": bool(persist),
+        "applied": bool(confirm),
         "operations": [item.model_dump(mode="json") for item in result.operations],
         "diff": result.diff,
         "domain_counts": _domain_counts(state),
         "analysis_synced": synced_analysis,
     }
     console.print(Panel(_console_safe(json.dumps(payload, ensure_ascii=False, indent=2)), title="Edit State"))
+
+
+@app.command("state-objects")
+def state_objects(
+    story_id: str = typer.Option(..., "--story-id", help="Story id to inspect."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
+    object_type: str = typer.Option("", "--object-type", help="Optional state object type filter."),
+    limit: int = typer.Option(80, "--limit", min=1, help="Maximum objects to return."),
+    include_payload: bool = typer.Option(True, "--include-payload/--summary-only", help="Include full object payload."),
+    output: Path | None = typer.Option(None, "--output", help="Optional JSON output path."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    task_id = normalize_task_id(task_id, story_id)
+    repository = build_story_state_repository(_database_url(database_url), auto_init_schema=True)
+    rows = repository.load_state_objects(
+        story_id,
+        task_id=task_id,
+        object_type=object_type or None,
+        limit=limit,
+    )
+    objects = []
+    counts: dict[str, int] = {}
+    authority_counts: dict[str, int] = {}
+    for row in rows:
+        item = dict(row)
+        counts[str(item.get("object_type") or "")] = counts.get(str(item.get("object_type") or ""), 0) + 1
+        authority = str(item.get("authority") or "")
+        authority_counts[authority] = authority_counts.get(authority, 0) + 1
+        if not include_payload:
+            item.pop("payload", None)
+        objects.append(item)
+    payload = {
+        "story_id": story_id,
+        "task_id": task_id,
+        "object_type": object_type,
+        "count": len(objects),
+        "type_counts": counts,
+        "authority_counts": authority_counts,
+        "objects": objects,
+    }
+    _emit_json_panel(payload, title="State Objects", output=output)
+
+
+@app.command("state-candidates")
+def state_candidates(
+    story_id: str = typer.Option(..., "--story-id", help="Story id to inspect."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
+    status: str = typer.Option("", "--status", help="Optional candidate status filter."),
+    candidate_set_id: str = typer.Option("", "--candidate-set-id", help="Optional candidate set id filter."),
+    limit: int = typer.Option(40, "--limit", min=1, help="Maximum candidate sets/items to return."),
+    output: Path | None = typer.Option(None, "--output", help="Optional JSON output path."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    task_id = normalize_task_id(task_id, story_id)
+    repository = build_story_state_repository(_database_url(database_url), auto_init_schema=True)
+    candidate_sets = repository.load_state_candidate_sets(
+        story_id,
+        task_id=task_id,
+        status=status or None,
+        limit=limit,
+    )
+    if candidate_set_id:
+        candidate_sets = [row for row in candidate_sets if row.get("candidate_set_id") == candidate_set_id]
+    set_ids = {str(row.get("candidate_set_id") or "") for row in candidate_sets}
+    candidate_items = repository.load_state_candidate_items(
+        story_id,
+        task_id=task_id,
+        candidate_set_id=candidate_set_id or None,
+        status=status or None,
+        limit=max(limit * 20, limit),
+    )
+    if set_ids:
+        candidate_items = [row for row in candidate_items if str(row.get("candidate_set_id") or "") in set_ids]
+    items_by_set: dict[str, list[dict[str, Any]]] = {}
+    item_status_counts: dict[str, int] = {}
+    for row in candidate_items:
+        item = dict(row)
+        item_status = str(item.get("status") or "")
+        item_status_counts[item_status] = item_status_counts.get(item_status, 0) + 1
+        items_by_set.setdefault(str(item.get("candidate_set_id") or ""), []).append(item)
+    sets_payload = []
+    for row in candidate_sets:
+        item = dict(row)
+        item["items"] = items_by_set.get(str(item.get("candidate_set_id") or ""), [])
+        sets_payload.append(item)
+    payload = {
+        "story_id": story_id,
+        "task_id": task_id,
+        "status": status,
+        "candidate_set_id": candidate_set_id,
+        "candidate_set_count": len(sets_payload),
+        "candidate_item_count": sum(len(item.get("items", [])) for item in sets_payload),
+        "item_status_counts": item_status_counts,
+        "candidate_sets": sets_payload,
+    }
+    _emit_json_panel(payload, title="State Candidates", output=output)
+
+
+@app.command("review-state-candidates")
+def review_state_candidates(
+    candidate_set_id: str = typer.Argument(..., help="Candidate set id to review."),
+    story_id: str = typer.Option(..., "--story-id", help="Story id to update."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
+    action: str = typer.Option(..., "--action", help="accept or reject."),
+    candidate_item_id: list[str] = typer.Option(None, "--candidate-item-id", help="Optional candidate item id. Repeat to review selected items."),
+    authority: str = typer.Option("canonical", "--authority", help="canonical or author_locked when accepting."),
+    reviewed_by: str = typer.Option("author", "--reviewed-by", help="Reviewer label."),
+    reason: str = typer.Option("", "--reason", help="Review reason or note."),
+    output: Path | None = typer.Option(None, "--output", help="Optional JSON output path."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    task_id = normalize_task_id(task_id, story_id)
+    repository = build_story_state_repository(_database_url(database_url), auto_init_schema=True)
+    clean_action = action.strip().lower()
+    item_ids = [item for item in (candidate_item_id or []) if item]
+    if clean_action in {"accept", "accepted", "promote"}:
+        result = repository.accept_state_candidates(
+            story_id,
+            task_id=task_id,
+            candidate_set_id=candidate_set_id,
+            candidate_item_ids=item_ids,
+            authority=authority,
+            reviewed_by=reviewed_by,
+            reason=reason,
+        )
+    elif clean_action in {"reject", "rejected", "dismiss"}:
+        result = repository.reject_state_candidates(
+            story_id,
+            task_id=task_id,
+            candidate_set_id=candidate_set_id,
+            candidate_item_ids=item_ids,
+            reviewed_by=reviewed_by,
+            reason=reason,
+        )
+    else:
+        raise typer.BadParameter("--action must be accept or reject")
+    reviewed_sets = repository.load_state_candidate_sets(
+        story_id,
+        task_id=task_id,
+        limit=1000,
+    )
+    payload = {
+        **result,
+        "action": clean_action,
+        "authority": authority if clean_action in {"accept", "accepted", "promote"} else "",
+        "reviewed_by": reviewed_by,
+        "selected_item_count": len(item_ids),
+        "candidate_set_status": next(
+            (
+                row.get("status")
+                for row in reviewed_sets
+                if row.get("candidate_set_id") == candidate_set_id
+            ),
+            "",
+        ),
+    }
+    _emit_json_panel(payload, title="Review State Candidates", output=output)
+
+
+@app.command("review-state")
+def review_state(
+    story_id: str = typer.Option(..., "--story-id", help="Story id to review."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
+    output: Path | None = typer.Option(None, "--output", help="Optional state review JSON output path."),
+    persist: bool = typer.Option(True, "--persist/--no-persist", help="Persist review into state_review_runs."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    task_id = normalize_task_id(task_id, story_id)
+    repository = build_story_state_repository(_database_url(database_url), auto_init_schema=True)
+    state = repository.get(story_id, task_id=task_id)
+    if state is None:
+        raise typer.BadParameter(f"story state not found: {story_id}")
+    review_payload = StateCompletenessEvaluator().evaluate(state)
+    if output is not None:
+        _write_json_file(output, review_payload)
+    if persist:
+        repository.save_state_review(
+            _state_review_record_from_payload(
+                story_id=story_id,
+                task_id=task_id,
+                review_payload=review_payload,
+                source_id=str(state.metadata.get("state_version_no") or "current"),
+                state_version_no=int(state.metadata.get("state_version_no") or 0) or None,
+            )
+        )
+    payload = {
+        "story_id": story_id,
+        "task_id": task_id,
+        "persisted": bool(persist),
+        "output": str(output) if output else "",
+        "overall_score": review_payload.get("overall_score"),
+        "missing_dimensions": review_payload.get("missing_dimensions", []),
+        "weak_dimensions": review_payload.get("weak_dimensions", []),
+        "human_review_suggestions": review_payload.get("human_review_suggestions", []),
+    }
+    _emit_json_panel(payload, title="Review State")
+
+
+@app.command("materialize-state")
+def materialize_state(
+    story_id: str = typer.Option(..., "--story-id", help="Story id to materialize."),
+    task_id: str = typer.Option("", "--task-id", help="Task id. Defaults to story id."),
+    reason: str = typer.Option("materialize unified state objects into story_versions", "--reason", help="Materialization reason."),
+    database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
+) -> None:
+    task_id = normalize_task_id(task_id, story_id)
+    repository = build_story_state_repository(_database_url(database_url), auto_init_schema=True)
+    state = repository.get(story_id, task_id=task_id)
+    if state is None:
+        raise typer.BadParameter(f"story state not found: {story_id}")
+    state.metadata["task_id"] = task_id
+    state.metadata["materialized_from_unified_state"] = {
+        "reason": reason,
+        "previous_state_version_no": state.metadata.get("state_version_no"),
+        "object_overlay": state.metadata.get("unified_state_objects_overlay", {}),
+        "candidate_context": {
+            "candidate_set_count": (state.metadata.get("state_candidate_context") or {}).get("candidate_set_count", 0),
+            "candidate_item_count": (state.metadata.get("state_candidate_context") or {}).get("candidate_item_count", 0),
+        },
+    }
+    repository.save(state)
+    payload = {
+        "story_id": story_id,
+        "task_id": task_id,
+        "state_version_no": state.metadata.get("state_version_no"),
+        "domain_counts": _domain_counts(state),
+        "object_overlay": state.metadata.get("unified_state_objects_overlay", {}),
+        "reason": reason,
+    }
+    _emit_json_panel(payload, title="Materialize State")
 
 
 @app.command("author-session")
@@ -491,6 +914,7 @@ def author_session(
     answer: list[str] = typer.Option(None, "--answer", help="Non-interactive answer to generated clarification questions."),
     persist: bool = typer.Option(True, "--persist/--no-persist", help="Save confirmed author plan into the story state repository."),
     confirm: bool = typer.Option(True, "--confirm/--draft-only", help="Confirm and commit the final proposal."),
+    non_interactive: bool = typer.Option(False, "--non-interactive/--interactive", help="Do not prompt for clarification answers; leave questions pending."),
     llm: bool = typer.Option(False, "--llm/--rule", help="Use LLM-assisted author planning or rule planning."),
     rag: bool = typer.Option(True, "--rag/--no-rag", help="Retrieve RAG evidence before LLM author planning."),
     retrieval_limit: int = typer.Option(12, "--retrieval-limit", min=1, max=40, help="Author-dialogue RAG evidence limit."),
@@ -513,7 +937,12 @@ def author_session(
     state.metadata["task_id"] = task_id
     state.story.title = state.story.title or story_id
 
-    author_input = seed.strip() or console.input("作者初始想法/大纲> ").strip()
+    if seed.strip():
+        author_input = seed.strip()
+    elif non_interactive or not sys.stdin.isatty():
+        raise typer.BadParameter("author input is required in non-interactive mode. Pass --seed.")
+    else:
+        author_input = console.input("作者初始想法/大纲> ").strip()
     if not author_input:
         raise typer.BadParameter("author input is required.")
 
@@ -529,11 +958,15 @@ def author_session(
     proposal = engine.propose(state, author_input)
     collected_answers: list[str] = []
     scripted_answers = list(answer or [])
+    unresolved_questions = []
     for index, question in enumerate(proposal.clarifying_questions):
         prompt = f"{question.question} "
         if index < len(scripted_answers):
             reply = scripted_answers[index].strip()
             console.print(f"[{question.question_type}] {question.question}\n> {reply}")
+        elif non_interactive or not sys.stdin.isatty():
+            unresolved_questions.append(question)
+            continue
         else:
             reply = console.input(f"[{question.question_type}] {prompt}\n> ").strip()
         if reply:
@@ -542,9 +975,11 @@ def author_session(
     if collected_answers:
         combined = "\n".join([author_input, *collected_answers])
         proposal = engine.propose(state, combined)
+        unresolved_questions = list(proposal.clarifying_questions)
 
     confirmed = None
-    if confirm:
+    can_confirm = bool(confirm and not unresolved_questions)
+    if can_confirm:
         confirmed = engine.confirm(state, proposal_id=proposal.proposal_id)
     if persist and branch is not None:
         branch_store.save_branch(
@@ -581,12 +1016,15 @@ def author_session(
         "persisted": bool(persist),
         "llm": bool(llm),
         "proposal_id": proposal.proposal_id,
-        "status": confirmed.status if confirmed else proposal.status,
+        "status": confirmed.status if confirmed else ("needs_clarification" if unresolved_questions else proposal.status),
+        "confirm_requested": bool(confirm),
+        "confirmed": bool(confirmed),
+        "non_interactive": bool(non_interactive or not sys.stdin.isatty()),
         "collected_answers": collected_answers,
         "required_beats": proposal.proposed_plan.required_beats,
         "forbidden_beats": proposal.proposed_plan.forbidden_beats,
         "chapter_blueprints": [item.model_dump(mode="json") for item in proposal.proposed_chapter_blueprints],
-        "remaining_questions": [item.model_dump(mode="json") for item in proposal.clarifying_questions],
+        "remaining_questions": [item.model_dump(mode="json") for item in unresolved_questions],
         "retrieval_query_hints": proposal.retrieval_query_hints,
         "author_dialogue_retrieval": state.metadata.get("author_dialogue_retrieval_context", {}),
         "confirmed_constraints": [item.model_dump(mode="json") for item in state.domain.author_constraints],
@@ -776,21 +1214,25 @@ def analyze_task(
     source_type: str = typer.Option("target_continuation", "--source-type", help="Task source type."),
     llm: bool = typer.Option(False, "--llm/--rule", help="Use LLM-assisted analysis or rule analysis."),
     max_chunk_chars: int = typer.Option(
-        _env_int("NOVEL_AGENT_ANALYSIS_TARGET_CHARS", _env_int("NOVEL_AGENT_ANALYSIS_MAX_CHUNK_CHARS", 10000)),
+        _env_int("NOVEL_AGENT_ANALYSIS_TARGET_CHARS", _env_int("NOVEL_AGENT_ANALYSIS_MAX_CHUNK_CHARS", DEFAULT_ANALYSIS_CHUNK_CHARS)),
         "--max-chunk-chars",
         min=400,
         help="Soft analysis chunk budget. Natural chapter/paragraph boundaries are preferred.",
     ),
     overlap_chars: int = typer.Option(
-        _env_int("NOVEL_AGENT_ANALYSIS_CHUNK_OVERLAP_CHARS", 800),
+        _env_int("NOVEL_AGENT_ANALYSIS_CHUNK_OVERLAP_CHARS", DEFAULT_ANALYSIS_OVERLAP_CHARS),
         "--overlap-chars",
         min=0,
         help="Analysis chunk overlap in characters.",
     ),
+    evidence_only: bool = typer.Option(False, "--evidence-only/--analysis-candidates", help="Only ingest this file into RAG evidence; do not run structural analysis or create state candidates."),
+    evidence_target_chars: int = typer.Option(_env_int("NOVEL_AGENT_REFERENCE_INGEST_TARGET_CHARS", 1600), "--evidence-target-chars", min=300, help="Chunk size when --evidence-only is used."),
+    evidence_overlap_chars: int = typer.Option(_env_int("NOVEL_AGENT_REFERENCE_INGEST_OVERLAP_CHARS", 180), "--evidence-overlap-chars", min=0, help="Chunk overlap when --evidence-only is used."),
     llm_max_chunks: int = typer.Option(0, "--llm-max-chunks", min=0, help="Optional cap for LLM analyzed chunks."),
     llm_concurrency: int = typer.Option(1, "--llm-concurrency", min=1, max=8, help="Concurrent chunk-level LLM calls. Default keeps stable serial behavior."),
     persist: bool = typer.Option(True, "--persist/--no-persist", help="Save analysis assets into repository."),
     output: Path | None = typer.Option(None, "--output", help="Optional analysis JSON output path."),
+    state_review_output: Path | None = typer.Option(None, "--state-review-output", help="Optional state completeness review JSON path."),
     cache_dir: Path = typer.Option(Path("novels_output/analysis_cache"), "--cache-dir", help="Directory for automatic analysis JSON cache."),
     database_url: str = typer.Option("", "--database-url", help="Override NOVEL_AGENT_DATABASE_URL."),
 ) -> None:
@@ -799,6 +1241,31 @@ def analyze_task(
     if persist:
         _ensure_database_available(db_url, label="before LLM analysis")
     text_value = _read_text_file(file)
+    if evidence_only:
+        if not persist:
+            raise typer.BadParameter("--evidence-only requires --persist so the RAG evidence can be stored.")
+        pipeline = TxtIngestionPipeline(database_url=db_url)
+        ingest_result = pipeline.ingest_txt(
+            story_id=story_id,
+            file_path=file,
+            title=title or file.stem,
+            source_type=source_type,
+            task_id=task_id,
+            target_chars=evidence_target_chars,
+            overlap_chars=evidence_overlap_chars,
+        )
+        summary = {
+            "task_id": task_id,
+            "story_id": story_id,
+            "source_type": source_type,
+            "source_role": _source_role_from_source_type(source_type),
+            "status": "evidence_only_ingested",
+            "document_id": ingest_result.document_id,
+            "chapter_count": ingest_result.chapter_count,
+            "chunk_count": ingest_result.chunk_count,
+        }
+        console.print(Panel(_console_safe(json.dumps(summary, ensure_ascii=False, indent=2)), title="Analyze Task Evidence Only"))
+        return
     analyzer = (
         LLMNovelAnalyzer(
             task_id=task_id,
@@ -817,7 +1284,19 @@ def analyze_task(
         story_title=title or file.stem,
     )
     analysis.summary["task_id"] = task_id
+    analysis.summary["source_type"] = source_type
+    analysis.summary["source_role"] = _source_role_from_source_type(source_type)
+    analysis.analysis_state["source_type"] = source_type
+    analysis.analysis_state["source_role"] = _source_role_from_source_type(source_type)
+    normalize_analysis_result_identities(analysis)
     payload = analysis.model_dump(mode="json")
+    review_payload = None
+    if state_review_output is not None:
+        review_state = scope_bootstrap_state_to_story(NovelAgentState.demo("state review"), story_id)
+        review_state.metadata["task_id"] = task_id
+        apply_analysis_to_state(review_state, analysis)
+        review_payload = StateCompletenessEvaluator().evaluate(review_state)
+        _write_json_file(state_review_output, review_payload)
     cache_path = _analysis_cache_path(
         cache_dir=cache_dir,
         task_id=task_id,
@@ -833,6 +1312,15 @@ def analyze_task(
             _ensure_database_available(db_url, label="before saving analysis")
             repository = build_story_state_repository(db_url, auto_init_schema=True)
             repository.save_analysis_assets(analysis)
+            if review_payload is not None:
+                repository.save_state_review(
+                    _state_review_record_from_payload(
+                        story_id=story_id,
+                        task_id=task_id,
+                        review_payload=review_payload,
+                        source_id=analysis.analysis_version,
+                    )
+                )
             persisted = True
         except Exception as exc:
             console.print(
@@ -867,6 +1355,8 @@ def analyze_task(
         "summary": analysis.summary,
         "output": str(output) if output else "",
         "cache_path": str(cache_path),
+        "state_review_output": str(state_review_output) if state_review_output else "",
+        "state_review_score": review_payload.get("overall_score") if review_payload else None,
     }
     console.print(Panel(_console_safe(json.dumps(summary, ensure_ascii=False, indent=2)), title="Analyze Task"))
 
@@ -884,6 +1374,12 @@ def import_analysis_json(
     task_id = normalize_task_id(task_id or (payload.get("summary") or {}).get("task_id"), payload.get("story_id", ""))
     payload.setdefault("summary", {})
     payload["summary"]["task_id"] = task_id
+    source_type = str(payload["summary"].get("source_type") or payload.get("analysis_state", {}).get("source_type") or "primary_story")
+    payload["summary"]["source_type"] = source_type
+    payload["summary"]["source_role"] = str(payload["summary"].get("source_role") or _source_role_from_source_type(source_type))
+    payload.setdefault("analysis_state", {})
+    payload["analysis_state"]["source_type"] = source_type
+    payload["analysis_state"]["source_role"] = payload["summary"]["source_role"]
     analysis = AnalysisRunResult.model_validate(payload)
     db_url = _database_url(database_url)
     _ensure_database_available(db_url, label="before importing analysis JSON")
@@ -998,13 +1494,13 @@ def ingest_txt(
     source_type: str = typer.Option("original_novel", "--source-type", help="Source document type."),
     encoding: str = typer.Option("auto", "--encoding", help="auto, utf-8, or gb18030."),
     target_chars: int = typer.Option(
-        _env_int("NOVEL_AGENT_INGEST_TARGET_CHARS", 1000),
+        _env_int("NOVEL_AGENT_INGEST_TARGET_CHARS", 1600),
         "--target-chars",
         min=300,
         help="Target chunk size in characters.",
     ),
     overlap_chars: int = typer.Option(
-        _env_int("NOVEL_AGENT_INGEST_OVERLAP_CHARS", 160),
+        _env_int("NOVEL_AGENT_INGEST_OVERLAP_CHARS", 180),
         "--overlap-chars",
         min=0,
         help="Chunk overlap in characters.",
@@ -1171,6 +1667,54 @@ def web(
         uvicorn.run(create_app(), host=host, port=port)
 
 
+def _load_branch_rows_for_cli(database_url: str, *, story_id: str, task_id: str) -> list[dict[str, Any]]:
+    try:
+        engine = create_engine(database_url, future=True, connect_args={"connect_timeout": 3})
+        with engine.begin() as conn:
+            return [
+                dict(row)
+                for row in conn.execute(
+                    text(
+                        """
+                        SELECT branch_id, base_state_version_no, parent_branch_id, status,
+                               output_path, chapter_number, metadata, created_at, updated_at
+                        FROM continuation_branches
+                        WHERE task_id = :task_id AND story_id = :story_id
+                        ORDER BY updated_at DESC
+                        LIMIT 200
+                        """
+                    ),
+                    {"task_id": task_id, "story_id": story_id},
+                ).mappings().all()
+            ]
+    except Exception:
+        return []
+
+
+def _load_transition_rows_for_cli(database_url: str, *, story_id: str, task_id: str) -> list[dict[str, Any]]:
+    try:
+        engine = create_engine(database_url, future=True, connect_args={"connect_timeout": 3})
+        with engine.begin() as conn:
+            return [
+                dict(row)
+                for row in conn.execute(
+                    text(
+                        """
+                        SELECT transition_id, target_object_id, target_object_type, transition_type,
+                               field_path, confidence, authority, status, created_by, created_at
+                        FROM state_transitions
+                        WHERE task_id = :task_id AND story_id = :story_id
+                        ORDER BY created_at DESC
+                        LIMIT 500
+                        """
+                    ),
+                    {"task_id": task_id, "story_id": story_id},
+                ).mappings().all()
+            ]
+    except Exception:
+        return []
+
+
 def _author_plan_snapshot(state: NovelAgentState) -> dict:
     return {
         "author_plan": state.domain.author_plan.model_dump(mode="json"),
@@ -1294,6 +1838,53 @@ def _analysis_cache_path(*, cache_dir: Path, task_id: str, story_id: str, analys
 def _write_json_file(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _state_review_record_from_payload(
+    *,
+    story_id: str,
+    task_id: str,
+    review_payload: dict[str, Any],
+    source_id: str,
+    state_version_no: int | None = None,
+) -> StateReviewRunRecord:
+    return StateReviewRunRecord(
+        review_id=scoped_storage_id(task_id, story_id, "state-review", source_id or "latest"),
+        story_id=story_id,
+        task_id=task_id,
+        state_version_no=state_version_no,
+        review_type=str(review_payload.get("review_type") or "state_completeness"),
+        overall_score=float(review_payload.get("overall_score", 0.0) or 0.0),
+        dimension_scores=dict(review_payload.get("dimension_scores") or {}),
+        missing_dimensions=[str(item) for item in review_payload.get("missing_dimensions", [])],
+        weak_dimensions=[str(item) for item in review_payload.get("weak_dimensions", [])],
+        low_confidence_items=[dict(item) for item in review_payload.get("low_confidence_items", []) if isinstance(item, dict)],
+        missing_evidence_items=[dict(item) for item in review_payload.get("missing_evidence_items", []) if isinstance(item, dict)],
+        conflict_items=[dict(item) for item in review_payload.get("conflict_items", []) if isinstance(item, dict)],
+        human_review_questions=[str(item) for item in review_payload.get("human_review_suggestions", [])],
+    )
+
+
+def _emit_json_panel(payload: dict[str, Any], *, title: str, output: Path | None = None) -> None:
+    text_payload = json.dumps(_json_ready(payload), ensure_ascii=False, indent=2)
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(text_payload, encoding="utf-8")
+    console.print(Panel(_console_safe(text_payload), title=title))
+
+
+def _json_ready(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_ready(item) for item in value]
+    if hasattr(value, "model_dump"):
+        return _json_ready(value.model_dump(mode="json"))
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
 
 
 def _ensure_database_available(database_url: str, *, label: str = "database check") -> None:

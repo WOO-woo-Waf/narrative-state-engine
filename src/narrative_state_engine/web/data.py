@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+from collections import defaultdict, deque
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,18 @@ from narrative_state_engine.task_scope import normalize_task_id
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 OUTPUT_DIR = PROJECT_ROOT / "novels_output"
+LOG_DIR = PROJECT_ROOT / "logs"
+LLM_INTERACTIONS_LOG = LOG_DIR / "llm_interactions.jsonl"
+LLM_TOKEN_USAGE_LOG = LOG_DIR / "llm_token_usage.jsonl"
+MILLION_TOKENS = 1_000_000
+
+
+DEEPSEEK_WEB_PRICES = {
+    "deepseek-v4-flash": (0.02, 1.0, 2.0),
+    "deepseek-chat": (0.02, 1.0, 2.0),
+    "deepseek-reasoner": (0.02, 1.0, 2.0),
+    "deepseek-v4-pro": (0.025, 3.0, 6.0),
+}
 
 
 FIELD_HELP = {
@@ -41,6 +55,84 @@ def short_text(value: Any, limit: int = 260) -> str:
     if len(text_value) <= limit:
         return text_value
     return f"{text_value[:limit].rstrip()}..."
+
+
+def _count_by_key(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        value = str(row.get(key) or "unknown")
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def _int_value(value: Any) -> int:
+    try:
+        return max(int(value or 0), 0)
+    except Exception:
+        return 0
+
+
+def _float_value(value: Any) -> float:
+    try:
+        return max(float(value or 0), 0.0)
+    except Exception:
+        return 0.0
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(value))
+    except Exception:
+        return None
+
+
+def _jsonl_tail(path: Path, limit: int) -> list[tuple[int, dict[str, Any]]]:
+    if not path.exists():
+        return []
+    lines: deque[tuple[int, str]] = deque(maxlen=max(limit, 1))
+    with path.open("r", encoding="utf-8", errors="replace") as fh:
+        for line_no, line in enumerate(fh, 1):
+            if line.strip():
+                lines.append((line_no, line))
+    records: list[tuple[int, dict[str, Any]]] = []
+    for line_no, line in lines:
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            records.append((line_no, payload))
+    return records
+
+
+def _token_total(record: dict[str, Any], *keys: str) -> int:
+    for key in keys:
+        if record.get(key) not in (None, ""):
+            return _int_value(record.get(key))
+    return 0
+
+
+def _estimate_cost_yuan(record: dict[str, Any]) -> float:
+    if record.get("estimated_cost_yuan") not in (None, ""):
+        return _float_value(record.get("estimated_cost_yuan"))
+    model = str(record.get("model_name") or "").strip().lower()
+    price = DEEPSEEK_WEB_PRICES.get(model)
+    if price is None:
+        return 0.0
+    hit_price, miss_price, output_price = price
+    input_tokens = _token_total(record, "prompt_tokens", "input_tokens")
+    output_tokens = _token_total(record, "completion_tokens", "output_tokens")
+    cached = _token_total(record, "billable_input_cache_hit_tokens", "prompt_cache_hit_tokens")
+    miss = record.get("billable_input_cache_miss_tokens")
+    if miss in (None, ""):
+        prompt_miss = record.get("prompt_cache_miss_tokens")
+        miss = prompt_miss if prompt_miss not in (None, "") else max(input_tokens - cached, 0)
+    miss_tokens = _int_value(miss)
+    return (
+        cached / MILLION_TOKENS * hit_price
+        + miss_tokens / MILLION_TOKENS * miss_price
+        + output_tokens / MILLION_TOKENS * output_price
+    )
 
 
 @dataclass
@@ -155,9 +247,57 @@ class WorkbenchData:
                 story_id, task_id,
             ),
             "retrieval_runs": self._scalar("SELECT COUNT(*) FROM retrieval_runs WHERE task_id = :task_id AND story_id = :story_id", story_id, task_id),
+            "state_objects_by_type": self._key_counts(
+                """
+                SELECT object_type AS key, COUNT(*) AS count
+                FROM state_objects
+                WHERE task_id = :task_id AND story_id = :story_id
+                GROUP BY object_type
+                ORDER BY object_type
+                """,
+                story_id, task_id,
+            ),
+            "state_candidates_by_status": self._key_counts(
+                """
+                SELECT status AS key, COUNT(*) AS count
+                FROM state_candidate_sets
+                WHERE task_id = :task_id AND story_id = :story_id
+                GROUP BY status
+                ORDER BY status
+                """,
+                story_id, task_id,
+            ),
             "latest_state": self._latest_state_summary(story_id, task_id=task_id),
         }
         return {"task_id": task_id, "story_id": story_id, "status": status, "field_help": FIELD_HELP}
+
+    def state(self, story_id: str, *, task_id: str = "") -> dict[str, Any]:
+        task_id = normalize_task_id(task_id, story_id)
+        objects = self._state_objects(story_id, task_id=task_id)
+        candidate_sets = self._state_candidate_sets(story_id, task_id=task_id)
+        candidate_items = self._state_candidate_items(story_id, task_id=task_id)
+        items_by_set: dict[str, list[dict[str, Any]]] = {}
+        for item in candidate_items:
+            items_by_set.setdefault(str(item.get("candidate_set_id") or ""), []).append(item)
+        for item in candidate_sets:
+            item["items"] = items_by_set.get(str(item.get("candidate_set_id") or ""), [])[:40]
+        evidence_links = self._state_evidence_links(story_id, task_id=task_id)
+        return {
+            "story_id": story_id,
+            "task_id": task_id,
+            "state_objects": objects,
+            "state_object_type_counts": _count_by_key(objects, "object_type"),
+            "state_object_authority_counts": _count_by_key(objects, "authority"),
+            "state_evidence_links": evidence_links,
+            "state_evidence_link_count": len(evidence_links),
+            "candidate_sets": candidate_sets,
+            "candidate_items": candidate_items,
+            "candidate_item_type_counts": _count_by_key(candidate_items, "target_object_type"),
+            "candidate_item_status_counts": _count_by_key(candidate_items, "status"),
+            "candidate_status_counts": _count_by_key(candidate_sets, "status"),
+            "latest_reviews": self._state_review_runs(story_id, task_id=task_id),
+            "field_help": FIELD_HELP,
+        }
 
     def analysis(self, story_id: str, *, task_id: str = "") -> dict[str, Any]:
         task_id = normalize_task_id(task_id, story_id)
@@ -190,6 +330,7 @@ class WorkbenchData:
         state = self._latest_state(story_id, task_id=task_id)
         domain = state.get("domain", {}) if isinstance(state, dict) else {}
         metadata = state.get("metadata", {}) if isinstance(state, dict) else {}
+        reports = domain.get("reports", {}) if isinstance(domain.get("reports", {}), dict) else {}
         return {
             "story_id": story_id,
             "task_id": task_id,
@@ -197,6 +338,8 @@ class WorkbenchData:
             "author_constraints": domain.get("author_constraints", []),
             "chapter_blueprints": domain.get("chapter_blueprints", []),
             "author_plan_proposals": domain.get("author_plan_proposals", []),
+            "latest_state_edit_proposal": reports.get("latest_state_edit_proposal", {}),
+            "state_edit_history": reports.get("state_edit_history", []),
             "author_dialogue_retrieval": metadata.get("author_dialogue_retrieval_context", {}),
             "field_help": FIELD_HELP,
             "raw": {"domain": domain, "metadata": metadata},
@@ -254,7 +397,6 @@ class WorkbenchData:
                         "path": str(path.relative_to(self.project_root)),
                         "chars": len(text_value.strip()),
                         "preview": short_text(text_value, 900),
-                        "content": text_value,
                     }
                 )
         return {
@@ -278,6 +420,82 @@ class WorkbenchData:
             "output_files": files,
             "field_help": FIELD_HELP,
         }
+
+    def llm_calls(
+        self,
+        *,
+        story_id: str = "",
+        purpose: str = "",
+        model: str = "",
+        success: str = "",
+        date_from: str = "",
+        date_to: str = "",
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        limit = min(max(int(limit or 100), 1), 500)
+        calls = self._load_llm_calls(scan_limit=max(limit * 12, 2000))
+        filtered = [
+            call
+            for call in calls
+            if _call_matches(
+                call,
+                story_id=story_id,
+                purpose=purpose,
+                model=model,
+                success=success,
+                date_from=date_from,
+                date_to=date_to,
+            )
+        ][:limit]
+        summary = _summarize_llm_calls(filtered)
+        return {
+            "summary": summary,
+            "calls": [_compact_llm_call(call) for call in filtered],
+            "filters": {
+                "story_id": story_id,
+                "purpose": purpose,
+                "model": model,
+                "success": success,
+                "date_from": date_from,
+                "date_to": date_to,
+                "limit": limit,
+            },
+            "log_files": {
+                "interactions": str(LLM_INTERACTIONS_LOG),
+                "token_usage": str(LLM_TOKEN_USAGE_LOG),
+            },
+        }
+
+    def llm_call_detail(self, call_id: str) -> dict[str, Any]:
+        calls = self._load_llm_calls(scan_limit=6000, include_detail=True)
+        for call in calls:
+            if call.get("call_id") == call_id or call.get("interaction_id") == call_id:
+                return call
+        return {}
+
+    def _load_llm_calls(self, *, scan_limit: int, include_detail: bool = False) -> list[dict[str, Any]]:
+        interactions = _jsonl_tail(LLM_INTERACTIONS_LOG, scan_limit)
+        usages = [_normalize_usage_record(line_no, row) for line_no, row in _jsonl_tail(LLM_TOKEN_USAGE_LOG, scan_limit)]
+        calls_by_id: dict[str, dict[str, Any]] = {}
+        for line_no, row in interactions:
+            call_id = str(row.get("interaction_id") or f"legacy-line-{line_no}")
+            call = calls_by_id.setdefault(
+                call_id,
+                {
+                    "call_id": call_id,
+                    "interaction_id": str(row.get("interaction_id") or ""),
+                    "events": [],
+                    "usage": {},
+                },
+            )
+            call["events"].append({"line_no": line_no, **row})
+            _merge_interaction_event(call, row, line_no=line_no)
+        for call in calls_by_id.values():
+            usage = _find_usage_for_call(call, usages)
+            if usage:
+                call["usage"] = usage
+            _finalize_llm_call(call, include_detail=include_detail)
+        return sorted(calls_by_id.values(), key=lambda item: item.get("timestamp") or "", reverse=True)
 
     def _query(self, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         if self.engine is None:
@@ -401,6 +619,143 @@ class WorkbenchData:
             for row in rows
         ]
 
+    def _state_objects(self, story_id: str, task_id: str = "") -> list[dict[str, Any]]:
+        task_id = normalize_task_id(task_id, story_id)
+        rows = self._query(
+            """
+            SELECT obj.object_id, obj.object_type, obj.object_key, obj.display_name,
+                   obj.authority, obj.status, obj.confidence, obj.author_locked,
+                   obj.payload, obj.current_version_no, obj.updated_by, obj.updated_at,
+                   COUNT(link.link_id) AS evidence_count
+            FROM state_objects obj
+            LEFT JOIN state_evidence_links link
+              ON link.task_id = obj.task_id
+             AND link.story_id = obj.story_id
+             AND link.object_id = obj.object_id
+            WHERE obj.task_id = :task_id AND obj.story_id = :story_id
+            GROUP BY obj.object_id, obj.object_type, obj.object_key, obj.display_name,
+                     obj.authority, obj.status, obj.confidence, obj.author_locked,
+                     obj.payload, obj.current_version_no, obj.updated_by, obj.updated_at
+            ORDER BY obj.object_type, obj.authority DESC, obj.confidence DESC, obj.display_name
+            LIMIT 300
+            """,
+            {"task_id": task_id, "story_id": story_id},
+        )
+        return [
+            {
+                **row,
+                "confidence": float(row.get("confidence", 0.0) or 0.0),
+                "author_locked": bool(row.get("author_locked")),
+                "evidence_count": int(row.get("evidence_count", 0) or 0),
+                "payload": jsonish(row.get("payload")) or {},
+                "updated_at": str(row.get("updated_at", "")),
+            }
+            for row in rows
+        ]
+
+    def _state_evidence_links(self, story_id: str, task_id: str = "") -> list[dict[str, Any]]:
+        task_id = normalize_task_id(task_id, story_id)
+        rows = self._query(
+            """
+            SELECT link.object_id, link.object_type, link.evidence_id, link.field_path,
+                   link.support_type, link.confidence, link.quote_text,
+                   evidence.evidence_type, evidence.chapter_index, evidence.metadata
+            FROM state_evidence_links link
+            LEFT JOIN narrative_evidence_index evidence
+              ON evidence.evidence_id = link.evidence_id
+            WHERE link.task_id = :task_id AND link.story_id = :story_id
+            ORDER BY link.object_type, link.object_id, link.confidence DESC
+            LIMIT 500
+            """,
+            {"task_id": task_id, "story_id": story_id},
+        )
+        return [
+            {
+                **row,
+                "confidence": float(row.get("confidence", 0.0) or 0.0),
+                "metadata": jsonish(row.get("metadata")) or {},
+            }
+            for row in rows
+        ]
+
+    def _state_candidate_sets(self, story_id: str, task_id: str = "") -> list[dict[str, Any]]:
+        task_id = normalize_task_id(task_id, story_id)
+        rows = self._query(
+            """
+            SELECT candidate_set_id, source_type, source_id, status, summary,
+                   model_name, metadata, created_at, reviewed_at
+            FROM state_candidate_sets
+            WHERE task_id = :task_id AND story_id = :story_id
+            ORDER BY created_at DESC
+            LIMIT 50
+            """,
+            {"task_id": task_id, "story_id": story_id},
+        )
+        return [
+            {
+                **row,
+                "metadata": jsonish(row.get("metadata")) or {},
+                "created_at": str(row.get("created_at", "")),
+                "reviewed_at": str(row.get("reviewed_at", "")),
+            }
+            for row in rows
+        ]
+
+    def _state_candidate_items(self, story_id: str, task_id: str = "") -> list[dict[str, Any]]:
+        task_id = normalize_task_id(task_id, story_id)
+        rows = self._query(
+            """
+            SELECT candidate_item_id, candidate_set_id, target_object_id, target_object_type,
+                   field_path, operation, proposed_payload, confidence, authority_request,
+                   status, conflict_reason, created_at
+            FROM state_candidate_items
+            WHERE task_id = :task_id AND story_id = :story_id
+            ORDER BY created_at DESC, candidate_item_id
+            LIMIT 600
+            """,
+            {"task_id": task_id, "story_id": story_id},
+        )
+        return [
+            {
+                **row,
+                "proposed_payload": jsonish(row.get("proposed_payload")) or {},
+                "confidence": float(row.get("confidence", 0.0) or 0.0),
+                "created_at": str(row.get("created_at", "")),
+            }
+            for row in rows
+        ]
+
+    def _state_review_runs(self, story_id: str, task_id: str = "") -> list[dict[str, Any]]:
+        task_id = normalize_task_id(task_id, story_id)
+        rows = self._query(
+            """
+            SELECT review_id, state_version_no, review_type, overall_score,
+                   dimension_scores, missing_dimensions, weak_dimensions,
+                   low_confidence_items, missing_evidence_items, conflict_items,
+                   human_review_questions, created_at
+            FROM state_review_runs
+            WHERE task_id = :task_id AND story_id = :story_id
+            ORDER BY created_at DESC
+            LIMIT 20
+            """,
+            {"task_id": task_id, "story_id": story_id},
+        )
+        return [
+            {
+                **row,
+                "overall_score": float(row.get("overall_score", 0.0) or 0.0),
+                "dimension_scores": jsonish(row.get("dimension_scores")) or {},
+                "missing_dimensions": jsonish(row.get("missing_dimensions")) or [],
+                "weak_dimensions": jsonish(row.get("weak_dimensions")) or [],
+                "low_confidence_items": jsonish(row.get("low_confidence_items")) or [],
+                "missing_evidence_items": jsonish(row.get("missing_evidence_items")) or [],
+                "conflict_items": jsonish(row.get("conflict_items")) or [],
+                "human_review_questions": jsonish(row.get("human_review_questions")) or [],
+                "created_at": str(row.get("created_at", "")),
+            }
+            for row in rows
+        ]
+
     def _branches(self, story_id: str, task_id: str = "") -> list[dict[str, Any]]:
         task_id = normalize_task_id(task_id, story_id)
         rows = self._query(
@@ -430,3 +785,247 @@ class WorkbenchData:
             }
             for row in rows
         ]
+
+
+def _normalize_usage_record(line_no: int, row: dict[str, Any]) -> dict[str, Any]:
+    input_tokens = _token_total(row, "prompt_tokens", "input_tokens")
+    output_tokens = _token_total(row, "completion_tokens", "output_tokens")
+    total_tokens = _token_total(row, "total_tokens") or input_tokens + output_tokens
+    cached = _token_total(row, "billable_input_cache_hit_tokens", "prompt_cache_hit_tokens")
+    miss = _token_total(row, "billable_input_cache_miss_tokens", "prompt_cache_miss_tokens")
+    if miss == 0 and cached == 0 and input_tokens:
+        miss = input_tokens
+    return {
+        "line_no": line_no,
+        "timestamp": str(row.get("timestamp") or ""),
+        "timestamp_dt": _parse_timestamp(row.get("timestamp")),
+        "interaction_id": str(row.get("interaction_id") or ""),
+        "model_name": str(row.get("model_name") or ""),
+        "api_base": str(row.get("api_base") or ""),
+        "purpose": str(row.get("purpose") or ""),
+        "success": bool(row.get("success")),
+        "stream": bool(row.get("stream")),
+        "story_id": str(row.get("story_id") or ""),
+        "thread_id": str(row.get("thread_id") or ""),
+        "actor": str(row.get("actor") or ""),
+        "action": str(row.get("action") or ""),
+        "duration_ms": _int_value(row.get("duration_ms")),
+        "input_tokens": input_tokens,
+        "cached_input_tokens": cached,
+        "uncached_input_tokens": miss,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "reasoning_tokens": _token_total(row, "completion_reasoning_tokens"),
+        "estimated_cost_yuan": round(_estimate_cost_yuan(row), 9),
+        "pricing_model_key": str(row.get("pricing_model_key") or ""),
+        "cache_breakdown_source": str(row.get("cache_breakdown_source") or ""),
+        "error_type": str(row.get("error_type") or ""),
+        "raw": row,
+    }
+
+
+def _merge_interaction_event(call: dict[str, Any], row: dict[str, Any], *, line_no: int) -> None:
+    event_type = str(row.get("event_type") or ("llm_request_succeeded" if row.get("success") else "llm_request_failed"))
+    current_rank = _event_rank(str(call.get("event_type") or ""))
+    new_rank = _event_rank(event_type)
+    if new_rank < current_rank:
+        return
+    call.update(
+        {
+            "line_no": line_no,
+            "timestamp": str(row.get("timestamp") or call.get("timestamp") or ""),
+            "timestamp_dt": _parse_timestamp(row.get("timestamp")) or call.get("timestamp_dt"),
+            "event_type": event_type,
+            "model_name": str(row.get("model_name") or ""),
+            "api_base": str(row.get("api_base") or ""),
+            "purpose": str(row.get("purpose") or ""),
+            "success": bool(row.get("success")),
+            "stream": bool(row.get("stream")),
+            "attempt": _int_value(row.get("attempt")) or 1,
+            "max_attempts": _int_value(row.get("max_attempts")) or 1,
+            "duration_ms": _int_value(row.get("duration_ms")),
+            "message_count": _int_value(row.get("message_count")),
+            "request_chars": _int_value(row.get("request_chars")),
+            "response_chars": _int_value(row.get("response_chars")),
+            "request_truncated": bool(row.get("request_truncated")),
+            "response_truncated": bool(row.get("response_truncated")),
+            "request_preview": str(row.get("request_preview") or ""),
+            "response_preview": str(row.get("response_preview") or ""),
+            "system_prompt_preview": str(row.get("system_prompt_preview") or ""),
+            "user_prompt_preview": str(row.get("user_prompt_preview") or ""),
+            "json_mode": bool(row.get("json_mode")),
+            "tools_count": _int_value(row.get("tools_count")),
+            "timeout_s": _float_value(row.get("timeout_s")),
+            "prompt_profile": str(row.get("prompt_profile") or ""),
+            "task_prompt_id": str(row.get("task_prompt_id") or ""),
+            "reasoning_mode": str(row.get("reasoning_mode") or ""),
+            "request_messages": row.get("request_messages") or [],
+            "request_options": row.get("request_options") or {},
+            "response_text": str(row.get("response_text") or ""),
+            "request_id": str(row.get("request_id") or ""),
+            "thread_id": str(row.get("thread_id") or ""),
+            "story_id": str(row.get("story_id") or ""),
+            "actor": str(row.get("actor") or ""),
+            "action": str(row.get("action") or ""),
+            "error_type": str(row.get("error_type") or ""),
+            "error_message": str(row.get("error_message") or ""),
+        }
+    )
+
+
+def _event_rank(event_type: str) -> int:
+    return {
+        "": 0,
+        "llm_request_started": 1,
+        "llm_request_retrying": 2,
+        "llm_request_failed": 3,
+        "llm_request_exhausted": 4,
+        "llm_request_succeeded": 5,
+    }.get(event_type, 3)
+
+
+def _find_usage_for_call(call: dict[str, Any], usages: list[dict[str, Any]]) -> dict[str, Any]:
+    interaction_id = str(call.get("interaction_id") or "")
+    if interaction_id:
+        for usage in reversed(usages):
+            if usage.get("interaction_id") == interaction_id:
+                return usage
+    call_time = call.get("timestamp_dt")
+    best: tuple[float, dict[str, Any]] | None = None
+    for usage in usages:
+        if not _usage_matches_call(call, usage):
+            continue
+        usage_time = usage.get("timestamp_dt")
+        delta = abs((call_time - usage_time).total_seconds()) if call_time and usage_time else 999999.0
+        if delta > 90:
+            continue
+        if best is None or delta < best[0]:
+            best = (delta, usage)
+    return best[1] if best else {}
+
+
+def _usage_matches_call(call: dict[str, Any], usage: dict[str, Any]) -> bool:
+    if usage.get("model_name") != call.get("model_name"):
+        return False
+    if usage.get("purpose") != call.get("purpose"):
+        return False
+    for key in ("story_id", "thread_id", "action"):
+        left = str(call.get(key) or "")
+        right = str(usage.get(key) or "")
+        if left and right and left != right:
+            return False
+    if bool(call.get("success")) != bool(usage.get("success")):
+        return False
+    return True
+
+
+def _finalize_llm_call(call: dict[str, Any], *, include_detail: bool) -> None:
+    usage = call.get("usage") or {}
+    call["input_tokens"] = _int_value(usage.get("input_tokens"))
+    call["cached_input_tokens"] = _int_value(usage.get("cached_input_tokens"))
+    call["uncached_input_tokens"] = _int_value(usage.get("uncached_input_tokens"))
+    call["output_tokens"] = _int_value(usage.get("output_tokens"))
+    call["total_tokens"] = _int_value(usage.get("total_tokens"))
+    call["reasoning_tokens"] = _int_value(usage.get("reasoning_tokens"))
+    call["estimated_cost_yuan"] = round(_float_value(usage.get("estimated_cost_yuan")), 9)
+    call["usage_matched"] = bool(usage)
+    call["duration_s"] = round(_int_value(call.get("duration_ms")) / 1000, 3)
+    if not include_detail:
+        call.pop("events", None)
+        call.pop("timestamp_dt", None)
+        call["usage"] = {key: value for key, value in usage.items() if key not in {"raw", "timestamp_dt"}}
+        return
+    call.pop("timestamp_dt", None)
+    call["events"] = [
+        {key: value for key, value in event.items() if key != "timestamp_dt"}
+        for event in call.get("events", [])
+    ]
+    if usage:
+        call["usage"] = {key: value for key, value in usage.items() if key != "timestamp_dt"}
+
+
+def _compact_llm_call(call: dict[str, Any]) -> dict[str, Any]:
+    keys = [
+        "call_id",
+        "interaction_id",
+        "timestamp",
+        "event_type",
+        "model_name",
+        "api_base",
+        "purpose",
+        "success",
+        "attempt",
+        "max_attempts",
+        "duration_ms",
+        "duration_s",
+        "request_chars",
+        "response_chars",
+        "request_preview",
+        "response_preview",
+        "story_id",
+        "thread_id",
+        "actor",
+        "action",
+        "error_type",
+        "error_message",
+        "input_tokens",
+        "cached_input_tokens",
+        "uncached_input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "reasoning_tokens",
+        "estimated_cost_yuan",
+        "usage_matched",
+    ]
+    return {key: call.get(key) for key in keys}
+
+
+def _call_matches(
+    call: dict[str, Any],
+    *,
+    story_id: str,
+    purpose: str,
+    model: str,
+    success: str,
+    date_from: str,
+    date_to: str,
+) -> bool:
+    if story_id and str(call.get("story_id") or "") != story_id:
+        return False
+    if purpose and purpose.lower() not in str(call.get("purpose") or "").lower():
+        return False
+    if model and model.lower() not in str(call.get("model_name") or "").lower():
+        return False
+    if success == "true" and not bool(call.get("success")):
+        return False
+    if success == "false" and bool(call.get("success")):
+        return False
+    day = str(call.get("timestamp") or "")[:10]
+    if date_from and day < date_from:
+        return False
+    if date_to and day > date_to:
+        return False
+    return True
+
+
+def _summarize_llm_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
+    by_model: dict[str, int] = defaultdict(int)
+    by_purpose: dict[str, int] = defaultdict(int)
+    for call in calls:
+        by_model[str(call.get("model_name") or "unknown")] += 1
+        by_purpose[str(call.get("purpose") or "unknown")] += 1
+    return {
+        "records": len(calls),
+        "success": sum(1 for call in calls if call.get("success")),
+        "failed": sum(1 for call in calls if not call.get("success")),
+        "matched_usage": sum(1 for call in calls if call.get("usage_matched")),
+        "input_tokens": sum(_int_value(call.get("input_tokens")) for call in calls),
+        "cached_input_tokens": sum(_int_value(call.get("cached_input_tokens")) for call in calls),
+        "uncached_input_tokens": sum(_int_value(call.get("uncached_input_tokens")) for call in calls),
+        "output_tokens": sum(_int_value(call.get("output_tokens")) for call in calls),
+        "total_tokens": sum(_int_value(call.get("total_tokens")) for call in calls),
+        "reasoning_tokens": sum(_int_value(call.get("reasoning_tokens")) for call in calls),
+        "estimated_cost_yuan": round(sum(_float_value(call.get("estimated_cost_yuan")) for call in calls), 9),
+        "by_model": dict(sorted(by_model.items())),
+        "by_purpose": dict(sorted(by_purpose.items())),
+    }
